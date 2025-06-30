@@ -1,0 +1,13 @@
+1. Request image output:
+Use a Gemini model that supports image output, such as "gemini-2.0-flash-preview-image-generation".
+Include responseModalities: ["TEXT", "IMAGE"] in the model configuration when calling the generateContent method. This tells the API to expect image data in the response, along with text. 
+2. Verify the model and region:
+Ensure the correct model ID is being used, and that it supports image generation.
+If using Firebase Cloud Functions or a similar serverless environment, confirm the function is deployed to a region where the chosen model is available. 
+3. Check for service outages:
+Occasionally, the Gemini API may experience temporary overloads or outages, which can lead to errors. If the problem persists after verifying code and configuration, check the Gemini API troubleshooting guide or Google AI Developers Forum for any known service disruptions. 
+4. Consider the Vertex AI backend:
+If using the @google/genai SDK, consider configuring it to use the Vertex AI backend for potentially more stability and explicit regional control. 
+5. Review API enablement and permissions:
+In the Google Cloud project settings, make sure the "Generative Language API" (for the standard Gemini API) or the "Vertex AI API" (if using Vertex AI) is enabled.
+Verify the service account or user has the necessary IAM permissions to access the Gemini API for image generation. 

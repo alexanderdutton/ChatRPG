@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini NPC Game</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        #dialogue-box {
+            border: 1px solid #ddd;
+            padding: 15px;
+            height: 350px; /* Fixed height */
+            overflow-y: auto; /* Added scrollbar */
+            background-color: #e9e9e9;
+            border-radius: 4px;
+            flex: 1; /* Take up available space */
+            margin-right: 10px; /* Space between dialogue and map */
+        }
+        .message { margin-bottom: 10px; }
+        .user-message { text-align: right; color: #0056b3; }
+        .npc-message { text-align: left; color: #28a745; }
+        input[type="text"] { width: calc(100% - 80px); padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 5px; }
+        button:hover { background-color: #0056b3; }
+        .loading { color: #888; font-style: italic; }
+        #status { margin-top: 10px; padding: 10px; border-radius: 4px; }
+        .status-ok { background-color: #d4edda; color: #155724; }
+        .status-error { background-color: #f8d7da; color: #721c24; }
+
+        /* New styles for overall layout */
+        .main-game-area {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .top-row {
+            display: flex;
+            gap: 20px;
+        }
+
+        .bottom-row {
+            display: flex;
+            justify-content: space-between; /* Distribute items evenly */
+            gap: 20px;
+        }
+
+        /* New styles for card display and layout */
+        .game-state-card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .game-state-card p {
+            margin: 5px 0;
+        }
+
+        .game-interaction-area {
+            display: flex;
+            gap: 20px; /* Space between dialogue and map */
+            margin-bottom: 15px;
+        }
+
+        .map-container {
+            flex: 1;
+        }
+
+        /* D-pad styling */
+        .d-pad-container {
+            display: grid;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(3, 60px);
+            gap: 2px;
+            width: 184px; /* 3 * 60px + 2 * 2px */
+            margin: 20px auto;
+            background-color: #333;
+            border-radius: 10px;
+            padding: 2px;
+        }
+        .d-pad-button {
+            background-color: #555;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .d-pad-button:hover {
+            background-color: #777;
+        }
+        .d-pad-button:active {
+            background-color: #999;
+        }
+        .d-pad-button.north { grid-area: 1 / 2 / 2 / 3; }
+        .d-pad-button.west { grid-area: 2 / 1 / 3 / 2; }
+        .d-pad-button.east { grid-area: 2 / 3 / 3 / 4; }
+        .d-pad-button.south { grid-area: 3 / 2 / 4 / 3; }
+        .d-pad-button.center { grid-area: 2 / 2 / 3 / 3; }
+
+        /* Tab styles */
+        .tabs { overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; }
+        .tablink { background-color: #f1f1f1; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; font-size: 17px; }
+        .tablink:hover { background-color: #ddd; }
+        .tablink.active { background-color: #ccc; }
+        .tabcontent { display: none; padding: 6px 12px; border: 1px solid #ccc; border-top: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>Interact with the NPC</h1>
+            <div id="status">Checking server connection...</div>
+        </div>
+
+        <div class="main-game-area">
+            <div class="top-row">
+                <div class="map-container">
+                    <div class="tabs">
+                        <button class="tablink" onclick="openTab(event, 'map-tab')">Map</button>
+                        <button class="tablink" onclick="openTab(event, 'character-tab')">Character</button>
+                    </div>
+
+                    <div id="map-tab" class="tabcontent" style="display:block">
+                        <h2>Map</h2>
+                        <pre id="game-map" style="background-color: #e9e9e9; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 2em;"></pre>
+                    </div>
+
+                    <div id="character-tab" class="tabcontent" style="display:none">
+                        <h2>Character</h2>
+                        <div id="npc-list"></div>
+                        <div id="character-interaction" style="display:none;">
+                            <img id="character-portrait" src="" alt="Character Portrait" style="width: 100%; max-width: 300px; display: block; margin: 0 auto;">
+                            <h3 id="character-name"></h3>
+                            <div id="dialogue-input-container">
+                                <input type="text" id="dialogue-input-character" placeholder="Type your message...">
+                                <button id="dialogue-send-button-character">Send</button>
+                            </div>
+                            <button id="back-to-npc-list">Back</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="dialogue-box">
+                    <div class="npc-message message">Game: Welcome to Gemini NPC Game! Initializing...</div>
+                </div>
+            </div>
+
+            <div class="bottom-row">
+                <div class="commands-area">
+                    <h2>Navigation</h2>
+                    <div class="d-pad-container">
+                        <button id="go-north-button" class="d-pad-button north">N</button>
+                        <button id="go-west-button" class="d-pad-button west">W</button>
+                        <button id="look-button" class="d-pad-button center">Look</button>
+                        <button id="go-east-button" class="d-pad-button east">E</button>
+                        <button id="go-south-button" class="d-pad-button south">S</button>
+                    </div>
+                </div>
+                <div class="commands-area">
+                    <h2>Other Commands</h2>
+                    <div id="other-commands">
+                        <button id="inventory-button">Inventory</button>
+                        <button id="enter-exit-button">Enter/Exit</button>
+                    </div>
+                </div>
+                <div id="game-state" class="game-state-card">
+                    <p><strong>Player:</strong> <span id="player-name"></span></p>
+                    <p><strong>Location:</strong> <span id="current-location"></span></p>
+                    <p><strong>Health:</strong> <span id="player-health"></span></p>
+                    <p><strong>Gold:</strong> <span id="player-gold"></span></p>
+                    <p><strong>Inventory:</strong> <span id="player-inventory"></span></p>
+                    <p><strong>Quests:</strong> <span id="quest-log"></span></p>
+                </div>
+            </div>
+        </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        console.log("Frontend script started.");
+        let sessionId = localStorage.getItem('gameSessionId'); // Persist session ID
+        const dialogueBox = document.getElementById('dialogue-box');
+        
+        const statusBox = document.getElementById('status');
+        const maxMessages = 50; // Maximum number of messages to display
+
+        function trimDialogueBox() {
+            const messages = dialogueBox.querySelectorAll('.message');
+            if (messages.length > maxMessages) {
+                for (let i = 0; i < messages.length - maxMessages; i++) {
+                    messages[i].remove();
+                }
+            }
+        }
+
+        // New elements for character interaction
+        const characterTab = document.getElementById('character-tab');
+        const npcListDiv = document.getElementById('npc-list');
+        const characterInteractionDiv = document.getElementById('character-interaction');
+        const characterPortrait = document.getElementById('character-portrait');
+        const characterName = document.getElementById('character-name');
+        const dialogueInputCharacter = document.getElementById('dialogue-input-character');
+        const dialogueSendButtonCharacter = document.getElementById('dialogue-send-button-character');
+        const backToNpcListButton = document.getElementById('back-to-npc-list');
+
+        let currentNPCId = null; // To keep track of the NPC being conversed with
+
+        window.openTab = function(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tablink");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+
+        // Command buttons
+        const goNorthButton = document.getElementById('go-north-button');
+        const goEastButton = document.getElementById('go-east-button');
+        const goSouthButton = document.getElementById('go-south-button');
+        const goWestButton = document.getElementById('go-west-button');
+        const inventoryButton = document.getElementById('inventory-button');
+        const lookButton = document.getElementById('look-button');
+        const enterExitButton = document.getElementById('enter-exit-button');
+
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://127.0.0.1:8000/health');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'ok') {
+                        statusBox.textContent = 'Server Connection: OK';
+                        statusBox.className = 'status-ok';
+                        return;
+                    }
+                }
+                throw new Error('Server status check failed');
+            } catch (error) {
+                console.error('Health check failed:', error);
+                statusBox.textContent = 'Server Connection: FAILED. Please ensure the backend is running.';
+                statusBox.className = 'status-error';
+            }
+        }
+
+        async function sendDialogue(message) {
+            if (!message || !currentNPCId) return; // Added check for currentNPCId
+
+            // Display user message
+            dialogueBox.innerHTML += `<div class="user-message message">You: ${message}</div>`;
+            dialogueBox.scrollTop = dialogueBox.scrollHeight; // Scroll to bottom
+
+            dialogueBox.innerHTML += `<div class="loading message">NPC is thinking...</div>`;
+            dialogueBox.scrollTop = dialogueBox.scrollHeight;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/interact', { // Adjust URL if your backend is elsewhere
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, message: message })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+
+                // Remove loading message
+                const loadingMessage = dialogueBox.querySelector('.loading');
+                if (loadingMessage) loadingMessage.remove();
+
+                sessionId = data.session_id;
+                localStorage.setItem('gameSessionId', sessionId); // Save new session ID
+
+                // Update game state display
+                document.getElementById('player-name').textContent = data.player_name;
+                document.getElementById('current-location').textContent = data.current_location;
+                document.getElementById('player-health').textContent = data.health;
+                document.getElementById('player-gold').textContent = data.gold;
+                document.getElementById('player-inventory').textContent = data.inventory.join(', ');
+                document.getElementById('quest-log').textContent = data.quest_log.join(', ');
+                console.log("Attempting to update map with:", data.map_display);
+                document.getElementById('game-map').textContent = data.map_display;
+                console.log("Map element content after update:", document.getElementById('game-map').textContent);
+
+                if (data.character_portrait) {
+                    characterPortrait.src = data.character_portrait;
+                    characterPortrait.style.display = 'block';
+                } else {
+                    characterPortrait.style.display = 'none';
+                }
+
+                // Display NPC message
+                dialogueBox.innerHTML += `<div class="npc-message message">NPC: ${data.dialogue}</div>`;
+                trimDialogueBox();
+            } catch (error) {
+                console.error('Error sending message:', error);
+                const loadingMessage = dialogueBox.querySelector('.loading');
+                if (loadingMessage) loadingMessage.remove();
+                dialogueBox.innerHTML += `<div class="npc-message message" style="color: red;">NPC: I'm sorry, I couldn't connect right now. Please check the console for details.</div>`;
+            } finally {
+                // Re-enable buttons
+                dialogueSendButtonCharacter.disabled = false;
+                dialogueBox.scrollTop = dialogueBox.scrollHeight;
+            }
+        }
+
+        async function sendCommand(command) {
+            // Display user command
+            dialogueBox.innerHTML += `<div class="user-message message">You: ${command}</div>`;
+            dialogueBox.scrollTop = dialogueBox.scrollHeight; // Scroll to bottom
+
+            // Disable buttons during command processing
+            dialogueSendButtonCharacter.disabled = true;
+            goNorthButton.disabled = true;
+            goEastButton.disabled = true;
+            goSouthButton.disabled = true;
+            goWestButton.disabled = true;
+            inventoryButton.disabled = true;
+            lookButton.disabled = true;
+            enterExitButton.disabled = true;
+
+            dialogueBox.innerHTML += `<div class="loading message">Processing command...</div>`;
+            dialogueBox.scrollTop = dialogueBox.scrollHeight;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/command', { // New command endpoint
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, command: command })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+
+                // Remove loading message
+                const loadingMessage = dialogueBox.querySelector('.loading');
+                if (loadingMessage) loadingMessage.remove();
+
+                sessionId = data.session_id;
+                localStorage.setItem('gameSessionId', sessionId); // Save new session ID
+
+                // Update game state display
+                document.getElementById('player-name').textContent = data.player_name;
+                document.getElementById('current-location').textContent = data.current_location;
+                document.getElementById('player-health').textContent = data.health;
+                document.getElementById('player-gold').textContent = data.gold;
+                document.getElementById('player-inventory').textContent = data.inventory.join(', ');
+                document.getElementById('quest-log').textContent = data.quest_log.join(', ');
+                console.log("Received map_display from backend:", data.map_display);
+                document.getElementById('game-map').textContent = data.map_display;
+                console.log("Map element content after update:", document.getElementById('game-map').textContent);
+
+                console.log("NPCs in location (sendCommand):", data.npcs_in_location);
+                // Update NPC list if available
+                if (data.npcs_in_location && data.npcs_in_location.length > 0) {
+                    npcListDiv.innerHTML = '<h3>NPCs Here:</h3>';
+                    data.npcs_in_location.forEach(npc => {
+                        const npcButton = document.createElement('button');
+                        npcButton.textContent = npc.name;
+                        npcButton.onclick = () => startCharacterInteraction(npc.id, npc.name);
+                        npcListDiv.appendChild(npcButton);
+                    });
+                    // Automatically switch to character tab if NPCs are present
+                    document.querySelector('.tablink:nth-child(2)').click(); // Click the Character tab
+                } else {
+                    npcListDiv.innerHTML = '<p>No NPCs in this location.</p>';
+                }
+
+                // Display command response
+                dialogueBox.innerHTML += `<div class="npc-message message">Game: ${data.dialogue}</div>`;
+                trimDialogueBox();
+            } catch (error) {
+                console.error('Error sending command:', error);
+                const loadingMessage = dialogueBox.querySelector('.loading');
+                if (loadingMessage) loadingMessage.remove();
+                dialogueBox.innerHTML += `<div class="npc-message message" style="color: red;">Game: Error processing command. Please check the console for details.</div>`;
+            } finally {
+                // Re-enable buttons
+                dialogueSendButtonCharacter.disabled = false;
+                goNorthButton.disabled = false;
+                goEastButton.disabled = false;
+                goSouthButton.disabled = false;
+                goWestButton.disabled = false;
+                inventoryButton.disabled = false;
+                lookButton.disabled = false;
+                enterExitButton.disabled = false;
+                dialogueBox.scrollTop = dialogueBox.scrollHeight;
+            }
+        }
+
+        
+
+        // Add event listeners for command buttons
+        goNorthButton.addEventListener('click', () => sendCommand('go north'));
+        goEastButton.addEventListener('click', () => sendCommand('go east'));
+        goSouthButton.addEventListener('click', () => sendCommand('go south'));
+        goWestButton.addEventListener('click', () => sendCommand('go west'));
+        inventoryButton.addEventListener('click', () => sendCommand('inventory'));
+        lookButton.addEventListener('click', () => sendCommand('look'));
+        enterExitButton.addEventListener('click', () => sendCommand('enter'));
+
+        // New character interaction functions and event listeners
+        async function startCharacterInteraction(npcId, npcName) {
+            currentNPCId = npcId;
+            characterName.textContent = npcName;
+            npcListDiv.style.display = 'none';
+            characterInteractionDiv.style.display = 'block';
+            // Optionally load portrait here if not already loaded by backend response
+            try {
+                const portraitResponse = await fetch(`http://127.0.0.1:8000/get_portrait/${npcId}`);
+                if (portraitResponse.ok) {
+                    const portraitData = await portraitResponse.json();
+                    characterPortrait.src = portraitData.portrait_url;
+                    characterPortrait.style.display = 'block';
+                } else {
+                    console.error('Error fetching portrait:', portraitResponse.statusText);
+                    characterPortrait.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error fetching portrait:', error);
+                characterPortrait.style.display = 'none';
+            }
+
+            // Send command to backend to initiate dialogue
+            await sendCommand(`talk to ${npcName}`);
+        }
+
+        backToNpcListButton.addEventListener('click', () => {
+            currentNPCId = null;
+            npcListDiv.style.display = 'block';
+            characterInteractionDiv.style.display = 'none';
+            characterPortrait.style.display = 'none';
+        });
+
+        dialogueSendButtonCharacter.addEventListener('click', () => {
+            if (currentNPCId) {
+                sendDialogue(dialogueInputCharacter.value.trim());
+                dialogueInputCharacter.value = '';
+            }
+        });
+
+        dialogueInputCharacter.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && currentNPCId) {
+                sendDialogue(dialogueInputCharacter.value.trim());
+                dialogueInputCharacter.value = '';
+            }
+        });
+
+        // Check server status on page load
+        checkServerStatus();
+
+        async function initializeGame() {
+            try {
+                const response = await fetch('http://127.0.0.1:8000/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+                sessionId = data.session_id;
+                localStorage.setItem('gameSessionId', sessionId);
+
+                // Update UI with initial data
+                dialogueBox.innerHTML += `<div class="npc-message message">Game: ${data.dialogue}</div>`;
+                document.getElementById('player-name').textContent = data.player_name;
+                document.getElementById('current-location').textContent = data.current_location;
+                document.getElementById('player-health').textContent = data.health;
+                document.getElementById('player-gold').textContent = data.gold;
+                document.getElementById('player-inventory').textContent = data.inventory.join(', ');
+                document.getElementById('quest-log').textContent = data.quest_log.join(', ');
+                document.getElementById('game-map').textContent = data.map_display;
+
+                console.log("NPCs in location (initializeGame):", data.npcs_in_location);
+                if (data.npcs_in_location && data.npcs_in_location.length > 0) {
+                    npcListDiv.innerHTML = '<h3>NPCs Here:</h3>';
+                    data.npcs_in_location.forEach(npc => {
+                        const npcButton = document.createElement('button');
+                        npcButton.textContent = npc.name;
+                        npcButton.onclick = () => startCharacterInteraction(npc.id, npc.name);
+                        npcListDiv.appendChild(npcButton);
+                    });
+                } else {
+                    npcListDiv.innerHTML = '<p>No NPCs in this location.</p>';
+                }
+
+                trimDialogueBox();
+            } catch (error) {
+                console.error('Error initializing game:', error);
+                dialogueBox.innerHTML += `<div class="npc-message message" style="color: red;">Game: Error initializing. Please check the console.</div>`;
+            }
+        }
+
+        // Check server status on page load
+        checkServerStatus();
+
+        // Ensure DOM is fully loaded before initializing game
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("DOMContentLoaded event fired.");
+            initializeGame();
+        });
+    </script>
+</body>
+</html>

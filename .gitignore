@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.log
+.env
+
+# Virtual environment
+venv/
+
+# IDEs
+.idea/
+.vscode/
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Generated files
+*.temp
+*.png # Temporarily exclude generated images until stable
