@@ -1,6 +1,6 @@
 # Gemini NPC Dialogue Game
 
-This project demonstrates a simple, scalable interactive game where Google's Gemini API provides the dialogue for Non-Player Characters (NPCs). It's designed to help you understand how to integrate Large Language Models (LLMs) into applications and manage conversational state.
+This project demonstrates a simple, scalable interactive game where Google's Gemini API provides the dialogue for Non-Player Characters (NPCs) and generates their portraits. It's designed to help you understand how to integrate Large Language Models (LLMs) into applications and manage conversational state, including multimodal capabilities.
 
 ## Architecture Overview
 
@@ -19,11 +19,14 @@ The application follows a client-server architecture:
 gemini-npc-game/
 ├── backend/
 │   ├── main.py                 # FastAPI application entry point
-│   ├── gemini_service.py       # Module for Gemini API interaction
+│   ├── gemini_service.py       # Module for Gemini API text interaction
+│   ├── gemini_image_generator.py # Module for Gemini API image generation
 │   ├── game_state_manager.py   # Manages in-memory game session state
+│   ├── game_maps.py            # Defines game maps, features, and NPC data
 │   └── requirements.txt        # Python dependencies
 ├── frontend/
-│   └── index.html              # Simple HTML/JS client
+│   ├── index.html              # Simple HTML/JS client
+│   └── portraits/              # Directory for generated NPC portraits
 └── README.md                   # This file
 ```
 

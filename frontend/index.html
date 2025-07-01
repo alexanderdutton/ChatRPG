@@ -427,7 +427,7 @@
             characterInteractionDiv.style.display = 'block';
             // Optionally load portrait here if not already loaded by backend response
             try {
-                const portraitResponse = await fetch(`http://127.0.0.1:8000/get_portrait/${npcId}`);
+                const portraitResponse = await fetch(`http://127.0.0.1:8000/npc_portrait/${npcId}`);
                 if (portraitResponse.ok) {
                     const portraitData = await portraitResponse.json();
                     characterPortrait.src = portraitData.portrait_url;

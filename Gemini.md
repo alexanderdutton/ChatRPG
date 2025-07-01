@@ -25,9 +25,12 @@ This project is a ChatRPG (Chat Role-Playing Game) with a Python backend and an 
 ## Known Issues
 - The game is in early development, and the map is very small.
 
+## Recent Successes
+- **Image Generation Fixed:** The issue with invalid image data from the Gemini API has been resolved. The `gemini_image_generator.py` now successfully generates and saves valid character portraits.
+
 ## Gemini Integration Goals
-- **NPC Dialogue:** Gemini should be used to generate dialogue when a player directly submits a message to a character.
-- **Character Portraits:** Gemini should be used to generate character portraits only when a portrait does not already exist in the `frontend/portraits/` folder. Generated portraits should be saved to this folder to avoid regenerating them.
+- **NPC Dialogue:** Gemini is used to generate dialogue when a player directly submits a message to a character. This functionality is now working as expected.
+- **Character Portraits:** Gemini is used to generate character portraits only when a portrait does not already exist in the `frontend/portraits/` folder. Generated portraits are saved to this folder to avoid regenerating them. This functionality is now working as expected.
 
 ## Quality Standards
 - **Linting:** Use a linter (e.g., `ruff` for Python, `ESLint` for JavaScript) to maintain code style and catch potential errors. Run linting checks before committing changes.
