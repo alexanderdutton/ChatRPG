@@ -1,7 +1,8 @@
-(venv) PS C:\Projects\_GeminiAssist\ChatRPG\backend> uvicorn main:app --reload
+INFO:     Stopping reloader process [29212]
+(venv) PS C:\Projects\_GeminiAssist\ChatRPG\backend> C:/Projects/_GeminiAssist/ChatRPG/backend/venv/Scripts/python.exe -m uvicorn main:app --reload
 ←[32mINFO←[0m:     Will watch for changes in these directories: ['C:\\Projects\\_GeminiAssist\\ChatRPG\\backend']
 ←[32mINFO←[0m:     Uvicorn running on ←[1mhttp://127.0.0.1:8000←[0m (Press CTRL+C to quit)
-←[32mINFO←[0m:     Started reloader process [←[36m←[1m43820←[0m] using ←[36m←[1mWatchFiles←[0m
+←[32mINFO←[0m:     Started reloader process [←[36m←[1m48648←[0m] using ←[36m←[1mWatchFiles←[0m
 Process SpawnProcess-1:
 Traceback (most recent call last):
   File "C:\Users\zengo\miniconda3\Lib\multiprocessing\process.py", line 314, in _bootstrap
@@ -41,6 +42,6 @@ Traceback (most recent call last):
   File "<frozen importlib._bootstrap>", line 690, in _load_unlocked
   File "<frozen importlib._bootstrap_external>", line 940, in exec_module
   File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
-  File "C:\Projects\_GeminiAssist\ChatRPG\backend\main.py", line 8, in <module>
-    from .game_state_manager import GameStateManager
-ImportError: attempted relative import with no known parent package
+  File "C:\Projects\_GeminiAssist\ChatRPG\backend\main.py", line 15, in <module>
+    from gemini_service import get_gemini_response, generate_game_data
+ImportError: cannot import name 'generate_game_data' from 'gemini_service'

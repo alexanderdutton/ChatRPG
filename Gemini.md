@@ -32,5 +32,9 @@ This project is a ChatRPG (Chat Role-Playing Game) with a Python backend and an 
 - **NPC Dialogue:** Gemini is used to generate dialogue when a player directly submits a message to a character. This functionality is now working as expected.
 - **Character Portraits:** Gemini is used to generate character portraits only when a portrait does not already exist in the `frontend/portraits/` folder. Generated portraits are saved to this folder to avoid regenerating them. This functionality is now working as expected.
 
+## Gemini API Usage Notes
+- **Text Generation:** Use `genai.GenerativeModel` to create a model instance and then call `generate_content_async` on that instance. System instructions should be passed to the `GenerativeModel` constructor.
+- **Image Generation:** Use `client.models.generate_content` directly, passing the model name as a parameter. Do not use this method for text generation.
+
 ## Quality Standards
 - **Linting:** Use a linter (e.g., `ruff` for Python, `ESLint` for JavaScript) to maintain code style and catch potential errors. Run linting checks before committing changes.

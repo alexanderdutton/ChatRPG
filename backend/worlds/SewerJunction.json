@@ -1,0 +1,40 @@
+{
+    "world": "Sewer Junction",
+    "description": "A dark and damp sewer junction.",
+    "locations": [
+        {
+            "name": "Sewer Junction",
+            "description": "A dimly lit junction in the sewers. Tunnels lead in several directions.",
+            "exits": {},
+            "features": [],
+            "raw_layout": [
+                "- - - - -",
+                "|         |",
+                "-   -@  -",
+                "|         |",
+                "- - - - -"
+            ],
+            "element_mapping": {
+                "-": "Wall",
+                "|": "Wall",
+                " ": "Floor",
+                "@": "Player Start"
+            },
+            "player_initial_location": {
+                "x": 2,
+                "y": 2
+            },
+            "characters": [
+                {
+                    "name": "Master Splinter",
+                    "race": "Mutant Rat",
+                    "occupation": "Sensei",
+                    "description": "An old, wise mutant rat, sensei to the Ninja Turtles.",
+                    "personality_prompt": "Master Splinter is wise, calm, and speaks in proverbs. He cares deeply for his sons.",
+                    "x": 1,
+                    "y": 1
+                }
+            ]
+        }
+    ]
+}

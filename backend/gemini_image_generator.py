@@ -2,7 +2,6 @@ import os
 import logging
 from PIL import Image
 import io
-import base64
 from google import genai
 from google.genai import types
 
@@ -12,7 +11,8 @@ def generate_and_save_image(prompt: str, output_path: str) -> bool:
     try:
         client = genai.Client()
         
-        logger.info(f"Attempting to generate image for prompt: '{prompt}' using Gemini API.")
+        logger.info(f"Attempting to generate image for prompt: '{prompt}' "
+                    "using Gemini API.")
         
         response = client.models.generate_content(
             model="gemini-2.0-flash-preview-image-generation",
@@ -41,5 +41,6 @@ def generate_and_save_image(prompt: str, output_path: str) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Error during Gemini API image generation or saving: {type(e).__name__}: {e}")
+        logger.error(f"Error during Gemini API image generation or saving: "
+                    f"{type(e).__name__}: {e}")
         return False

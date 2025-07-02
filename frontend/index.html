@@ -110,13 +110,79 @@
         .tablink { background-color: #f1f1f1; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; font-size: 17px; }
         .tablink:hover { background-color: #ddd; }
         .tablink.active { background-color: #ccc; }
-        .tabcontent { display: none; padding: 6px 12px; border: 1px solid #ccc; border-top: none; }
+
+        /* Modal styles */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed; /* Stay in place */
+            z-index: 1; /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%; /* Full width */
+            height: 100%; /* Full height */
+            overflow: auto; /* Enable scroll if needed */
+            background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto; /* 15% from the top and centered */
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%; /* Could be more or less, depending on screen size */
+            border-radius: 8px;
+            position: relative;
+        }
+
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        /* Hamburger menu icon */
+        .hamburger-menu {
+            font-size: 2em;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+
+        /* New map tile styles */
+        .map-tile {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            text-align: center;
+            line-height: 20px;
+            font-family: monospace;
+        }
+
+        .player-tile {
+            background-color: #90ee90; /* Light green */
+        }
+
+        .npc-tile {
+            background-color: #add8e6; /* Light blue */
+        }
+
+        .player-npc-tile {
+            background-color: #9370db; /* Medium purple */
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h1>Interact with the NPC</h1>
+            <h1>ChatRPG - <span id="world-name"></span></h1>
+            <span class="hamburger-menu" onclick="openModal('dataGenerationModal')">☰</span>
             <div id="status">Checking server connection...</div>
         </div>
 
@@ -129,12 +195,10 @@
                     </div>
 
                     <div id="map-tab" class="tabcontent" style="display:block">
-                        <h2>Map</h2>
-                        <pre id="game-map" style="background-color: #e9e9e9; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 2em;"></pre>
+                        <pre id="game-map" style="background-color: #e9e9e9; margin:0px;padding: 0px; border-radius: 4px; font-family: monospace; font-size: 2em;"></pre>
                     </div>
 
                     <div id="character-tab" class="tabcontent" style="display:none">
-                        <h2>Character</h2>
                         <div id="npc-list"></div>
                         <div id="character-interaction" style="display:none;">
                             <img id="character-portrait" src="" alt="Character Portrait" style="width: 100%; max-width: 300px; display: block; margin: 0 auto;">
@@ -181,8 +245,21 @@
             </div>
         </div>
 
-        </div>
+    </div>
 
+    <!-- The Modal -->
+    <div id="dataGenerationModal" class="modal">
+        <!-- Modal content -->
+        <div class="modal-content">
+            <span class="close-button" onclick="closeModal('dataGenerationModal')">&times;</span>
+            <h2>Generate New Game Data</h2>
+            <p>Enter a request for Gemini to generate new character or location data, or select from existing content.</p>
+            <input type="text" id="data-generation-input" placeholder="e.g., 'a grumpy dwarf' or 'a dark cave'">
+            <button id="generate-data-button">Generate Data</button>
+
+            <h3>Saved Worlds</h3>
+            <div id="world-list"></div>
+        </div>
     </div>
 
     <script>
@@ -193,14 +270,10 @@
         const statusBox = document.getElementById('status');
         const maxMessages = 50; // Maximum number of messages to display
 
-        function trimDialogueBox() {
-            const messages = dialogueBox.querySelectorAll('.message');
-            if (messages.length > maxMessages) {
-                for (let i = 0; i < messages.length - maxMessages; i++) {
-                    messages[i].remove();
-                }
-            }
-        }
+        // New elements for data generation
+        const dataGenerationInput = document.getElementById('data-generation-input');
+        const generateDataButton = document.getElementById('generate-data-button');
+        const worldListDiv = document.getElementById('world-list');
 
         // New elements for character interaction
         const characterTab = document.getElementById('character-tab');
@@ -214,6 +287,102 @@
 
         let currentNPCId = null; // To keep track of the NPC being conversed with
 
+        // Command buttons
+        const goNorthButton = document.getElementById('go-north-button');
+        const goEastButton = document.getElementById('go-east-button');
+        const goSouthButton = document.getElementById('go-south-button');
+        const goWestButton = document.getElementById('go-west-button');
+        const inventoryButton = document.getElementById('inventory-button');
+        const lookButton = document.getElementById('look-button');
+        const enterExitButton = document.getElementById('enter-exit-button');
+
+        // Modal functions
+        window.openModal = function(modalId) {
+            document.getElementById(modalId).style.display = 'block';
+            if (modalId === 'dataGenerationModal') {
+                listWorlds(); // Load worlds when modal opens
+            }
+        }
+
+        window.closeModal = function(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function trimDialogueBox() {
+            const messages = dialogueBox.querySelectorAll('.message');
+            if (messages.length > maxMessages) {
+                for (let i = 0; i < messages.length - maxMessages; i++) {
+                    messages[i].remove();
+                }
+            }
+        }
+
+        // Function to toggle movement controls
+        function toggleMovementControls(enable) {
+            goNorthButton.disabled = !enable;
+            goEastButton.disabled = !enable;
+            goSouthButton.disabled = !enable;
+            goWestButton.disabled = !enable;
+            lookButton.disabled = !enable;
+            enterExitButton.disabled = !enable;
+
+            if (enable) {
+                document.addEventListener('keydown', handleArrowKeys);
+            } else {
+                document.removeEventListener('keydown', handleArrowKeys);
+            }
+        }
+
+        // Handle arrow key presses
+        function handleArrowKeys(event) {
+            switch (event.key) {
+                case 'ArrowUp':
+                    sendCommand('go north');
+                    event.preventDefault();
+                    break;
+                case 'ArrowDown':
+                    sendCommand('go south');
+                    event.preventDefault();
+                    break;
+                case 'ArrowLeft':
+                    sendCommand('go west');
+                    event.preventDefault();
+                    break;
+                case 'ArrowRight':
+                    sendCommand('go east');
+                    event.preventDefault();
+                    break;
+            }
+        }
+
+        function updateMapDisplay(mapData) {
+            const gameMap = document.getElementById('game-map');
+            gameMap.innerHTML = ''; // Clear previous map
+
+            if (!mapData || !mapData.grid) {
+                gameMap.textContent = 'No map data available.';
+                return;
+            }
+
+            mapData.grid.forEach(row => {
+                const rowDiv = document.createElement('div');
+                row.forEach(tile => {
+                    const tileSpan = document.createElement('span');
+                    tileSpan.textContent = tile.char;
+                    tileSpan.className = 'map-tile';
+                    if (tile.has_player && tile.has_npc) {
+                        tileSpan.classList.add('player-npc-tile');
+                    } else if (tile.has_player) {
+                        tileSpan.classList.add('player-tile');
+                    } else if (tile.has_npc) {
+                        tileSpan.classList.add('npc-tile');
+                    }
+                    rowDiv.appendChild(tileSpan);
+                });
+                gameMap.appendChild(rowDiv);
+            });
+        }
+
         window.openTab = function(evt, tabName) {
             var i, tabcontent, tablinks;
             tabcontent = document.getElementsByClassName("tabcontent");
@@ -226,16 +395,14 @@
             }
             document.getElementById(tabName).style.display = "block";
             evt.currentTarget.className += " active";
-        }
 
-        // Command buttons
-        const goNorthButton = document.getElementById('go-north-button');
-        const goEastButton = document.getElementById('go-east-button');
-        const goSouthButton = document.getElementById('go-south-button');
-        const goWestButton = document.getElementById('go-west-button');
-        const inventoryButton = document.getElementById('inventory-button');
-        const lookButton = document.getElementById('look-button');
-        const enterExitButton = document.getElementById('enter-exit-button');
+            // Toggle movement controls based on tab
+            if (tabName === 'map-tab') {
+                toggleMovementControls(true);
+            } else {
+                toggleMovementControls(false);
+            }
+        }
 
         async function checkServerStatus() {
             try {
@@ -294,9 +461,8 @@
                 document.getElementById('player-gold').textContent = data.gold;
                 document.getElementById('player-inventory').textContent = data.inventory.join(', ');
                 document.getElementById('quest-log').textContent = data.quest_log.join(', ');
-                console.log("Attempting to update map with:", data.map_display);
-                document.getElementById('game-map').textContent = data.map_display;
-                console.log("Map element content after update:", document.getElementById('game-map').textContent);
+                console.log("Map display data received (sendDialogue):", data.map_display);
+                updateMapDisplay(data.map_display); // Update map display
 
                 if (data.character_portrait) {
                     characterPortrait.src = data.character_portrait;
@@ -327,13 +493,7 @@
 
             // Disable buttons during command processing
             dialogueSendButtonCharacter.disabled = true;
-            goNorthButton.disabled = true;
-            goEastButton.disabled = true;
-            goSouthButton.disabled = true;
-            goWestButton.disabled = true;
-            inventoryButton.disabled = true;
-            lookButton.disabled = true;
-            enterExitButton.disabled = true;
+            toggleMovementControls(false); // Disable movement controls during command processing
 
             dialogueBox.innerHTML += `<div class="loading message">Processing command...</div>`;
             dialogueBox.scrollTop = dialogueBox.scrollHeight;
@@ -366,9 +526,8 @@
                 document.getElementById('player-gold').textContent = data.gold;
                 document.getElementById('player-inventory').textContent = data.inventory.join(', ');
                 document.getElementById('quest-log').textContent = data.quest_log.join(', ');
-                console.log("Received map_display from backend:", data.map_display);
-                document.getElementById('game-map').textContent = data.map_display;
-                console.log("Map element content after update:", document.getElementById('game-map').textContent);
+                console.log("Map display data received (sendCommand):", data.map_display);
+                updateMapDisplay(data.map_display); // Update map display
 
                 console.log("NPCs in location (sendCommand):", data.npcs_in_location);
                 // Update NPC list if available
@@ -380,8 +539,7 @@
                         npcButton.onclick = () => startCharacterInteraction(npc.id, npc.name);
                         npcListDiv.appendChild(npcButton);
                     });
-                    // Automatically switch to character tab if NPCs are present
-                    document.querySelector('.tablink:nth-child(2)').click(); // Click the Character tab
+                    
                 } else {
                     npcListDiv.innerHTML = '<p>No NPCs in this location.</p>';
                 }
@@ -397,19 +555,14 @@
             } finally {
                 // Re-enable buttons
                 dialogueSendButtonCharacter.disabled = false;
-                goNorthButton.disabled = false;
-                goEastButton.disabled = false;
-                goSouthButton.disabled = false;
-                goWestButton.disabled = false;
-                inventoryButton.disabled = false;
-                lookButton.disabled = false;
-                enterExitButton.disabled = false;
+                // Re-enable movement controls after command processing, if map tab is active
+                if (document.getElementById('map-tab').style.display === 'block') {
+                    toggleMovementControls(true);
+                }
                 dialogueBox.scrollTop = dialogueBox.scrollHeight;
             }
         }
-
         
-
         // Add event listeners for command buttons
         goNorthButton.addEventListener('click', () => sendCommand('go north'));
         goEastButton.addEventListener('click', () => sendCommand('go east'));
@@ -450,6 +603,10 @@
             npcListDiv.style.display = 'block';
             characterInteractionDiv.style.display = 'none';
             characterPortrait.style.display = 'none';
+            // Re-enable movement controls when returning to NPC list (which is part of map tab)
+            if (document.getElementById('map-tab').style.display === 'block') {
+                toggleMovementControls(true);
+            }
         });
 
         dialogueSendButtonCharacter.addEventListener('click', () => {
@@ -465,9 +622,6 @@
                 dialogueInputCharacter.value = '';
             }
         });
-
-        // Check server status on page load
-        checkServerStatus();
 
         async function initializeGame() {
             try {
@@ -494,7 +648,9 @@
                 document.getElementById('player-gold').textContent = data.gold;
                 document.getElementById('player-inventory').textContent = data.inventory.join(', ');
                 document.getElementById('quest-log').textContent = data.quest_log.join(', ');
-                document.getElementById('game-map').textContent = data.map_display;
+                console.log("Map display data received (initializeGame):", data.map_display);
+                updateMapDisplay(data.map_display); // Update map display
+                document.getElementById('world-name').textContent = data.current_location; // Set world name in title
 
                 console.log("NPCs in location (initializeGame):", data.npcs_in_location);
                 if (data.npcs_in_location && data.npcs_in_location.length > 0) {
@@ -510,11 +666,106 @@
                 }
 
                 trimDialogueBox();
+                toggleMovementControls(true); // Enable movement controls on initial load
             } catch (error) {
                 console.error('Error initializing game:', error);
                 dialogueBox.innerHTML += `<div class="npc-message message" style="color: red;">Game: Error initializing. Please check the console.</div>`;
             }
         }
+
+        // Data generation functions
+        async function listWorlds() {
+            try {
+                const response = await fetch('http://127.0.0.1:8000/list_worlds');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                worldListDiv.innerHTML = '';
+                data.worlds.forEach(worldName => {
+                    const button = document.createElement('button');
+                    button.textContent = worldName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    button.onclick = () => loadWorld(worldName);
+                    worldListDiv.appendChild(button);
+                });
+
+            } catch (error) {
+                console.error('Error listing worlds:', error);
+                worldListDiv.innerHTML = '<p style="color: red;">Error loading worlds.</p>';
+            }
+        }
+
+        async function loadWorld(worldName) {
+            dialogueBox.innerHTML += `<div class="user-message message">Loading world: ${worldName}...</div>`;
+            dialogueBox.scrollTop = dialogueBox.scrollHeight;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/load_world', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ world_name: worldName })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+                dialogueBox.innerHTML += `<div class="npc-message message">Game: ${data.message}</div>`;
+                trimDialogueBox();
+                // Re-initialize game to load new data
+                initializeGame();
+                closeModal('dataGenerationModal'); // Close modal after loading world
+            } catch (error) {
+                console.error('Error loading world:', error);
+                dialogueBox.innerHTML += `<div class="npc-message message" style="color: red;">Game: Error loading world. Please check the console for details.</div>`;
+            } finally {
+                dialogueBox.scrollTop = dialogueBox.scrollHeight;
+            }
+        }
+
+        async function generateData(request = null) {
+            const requestText = request || dataGenerationInput.value.trim();
+            if (!requestText) return;
+
+            dialogueBox.innerHTML += `<div class="user-message message">Generating data for: ${requestText}...</div>`;
+            dialogueBox.scrollTop = dialogueBox.scrollHeight;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/generate_data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request: requestText })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+                dialogueBox.innerHTML += `<div class="npc-message message">Game: ${data.message}</div>`;
+                trimDialogueBox();
+                // Re-initialize game to load new data
+                initializeGame();
+                listWorlds(); // Refresh world list after generating new data
+            } catch (error) {
+                console.error('Error generating data:', error);
+                dialogueBox.innerHTML += `<div class="npc-message message" style="color: red;">Game: Error generating data. Please check the console for details.</div>`;
+            } finally {
+                dataGenerationInput.value = '';
+                dialogueBox.scrollTop = dialogueBox.scrollHeight;
+            }
+        }
+
+        generateDataButton.addEventListener('click', () => generateData());
+        dataGenerationInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                generateData();
+            }
+        });
 
         // Check server status on page load
         checkServerStatus();
@@ -522,7 +773,26 @@
         // Ensure DOM is fully loaded before initializing game
         document.addEventListener('DOMContentLoaded', () => {
             console.log("DOMContentLoaded event fired.");
-            initializeGame();
+            // Start a simple python server to serve the file
+            const port = 8001;
+            const server = `python -m http.server ${port}`;
+            const currentUrl = window.location.href;
+
+            if (!currentUrl.includes(`http://localhost:${port}`)) {
+                alert(`Starting server on port ${port}. Please refresh the page.`);
+                // This is a bit of a hack, but it works for local development
+                // In a real application, you would have a more robust solution
+                fetch('/start-server', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: server })
+                }).then(() => {
+                    window.location.href = `http://localhost:${port}/frontend/index.html`;
+                });
+            } else {
+                initializeGame();
+                listWorlds(); // Load worlds on page load
+            }
         });
     </script>
 </body>

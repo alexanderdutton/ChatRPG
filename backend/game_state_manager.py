@@ -1,49 +1,43 @@
 from typing import Dict, List, Any
-from game_maps import MAPS, FEATURES, START_MAP_ID, START_X, START_Y, build_map_data, MAP_ELEMENTS, CHARACTERS
+from game_world import game_world
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GameStateManager:
 
     def __init__(self):
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        print("GameStateManager initialized.") # Trivial change to force reload - Attempt 2
-
-    def find_door_coordinates(self, map_id: str) -> tuple[int, int] | None:
-        """Finds the coordinates of the 'D' (door) in a given map's layout."""
-        game_map = MAPS.get(map_id)
-        if not game_map:
-            return None
-        
-        layout = game_map.get("layout", [])
-        for r_idx, row in enumerate(layout):
-            for c_idx, cell in enumerate(row):
-                if cell == 'D':
-                    return r_idx, c_idx
-        return None # No door found
+        print("GameStateManager initialized.")
 
     def create_session(self, session_id: str, player_name: str = "Traveler"):
         """Creates a new game session."""
         if session_id not in self.sessions:
             # Initialize NPC states
             npc_states = {}
-            for npc_id, npc_data in CHARACTERS.items():
-                initial_location = npc_data['movement_schedule'][0]
-                npc_states[npc_id] = {
-                    'map_id': initial_location['map_id'],
-                    'x': initial_location['x'],
-                    'y': initial_location['y'],
-                    'movement_index': 0
-                }
+            for location_name, location_obj in game_world.locations.items():
+                for character_name, character_obj in \
+                        game_world.characters.get(location_name, {}).items():
+                    npc_states[character_name] = {
+                        'location': location_name,
+                        'x': character_obj.x,
+                        'y': character_obj.y
+                    }
+
+            # Get the first location from the loaded world
+            first_location_name = list(game_world.locations.keys())[0]
+            first_location = game_world.get_location(first_location_name)
 
             self.sessions[session_id] = {
                 "conversation_history": [],
-                "player_name": player_name, # Use provided player name
-                "current_map_id": START_MAP_ID,
-                "player_x": START_X, # Starting X coordinate
-                "player_y": START_Y, # Starting Y coordinate
-                "inventory": [], # List of items the player possesses
-                "health": 100, # Player's health points
-                "gold": 0, # Player's gold count
-                "quest_log": [], # List of active quests
+                "player_name": player_name,
+                "current_location_name": first_location_name,
+                "player_x": first_location.player_initial_location["x"],
+                "player_y": first_location.player_initial_location["y"],
+                "inventory": [],
+                "health": 100,
+                "gold": 0,
+                "quest_log": [],
                 "npc_states": npc_states
             }
             print(f"Session {session_id} created with initial NPC states: {npc_states}")
@@ -54,7 +48,6 @@ class GameStateManager:
 
     def get_conversation_history(self, session_id: str) -> List[Dict]:
         """Retrieves the conversation history for a given session."""
-        print(f"Accessing conversation history for session {session_id}.")
         return self.sessions.get(session_id, {}).get("conversation_history", [])
 
     def update_conversation_history(self, session_id: str, history: List[Dict]):
@@ -71,110 +64,74 @@ class GameStateManager:
         if session_id in self.sessions:
             self.sessions[session_id]["player_name"] = name
 
-    def get_current_location(self, session_id: str) -> str:
+    def get_current_location_name(self, session_id: str) -> str:
         """Retrieves the player's current location name for a given session."""
-        session = self.sessions.get(session_id, {})
-        map_id = session.get("current_map_id", START_MAP_ID)
-        processed_map = build_map_data(map_id)
-        return processed_map.get("name", "Unknown Location")
+        return self.sessions.get(session_id, {}).get("current_location_name", "Unknown Location")
 
-    def _get_feature_description(self, feature_id: str) -> str:
-        """Generates a description for a given feature."""
-        feature_info = FEATURES.get(feature_id)
-        if feature_info:
-            return feature_info["description_template"].format(name=feature_info["name"])
-        return ""
+    def set_current_location_name(self, session_id: str, location_name: str):
+        """Sets the player's current location name for a given session."""
+        if session_id in self.sessions:
+            self.sessions[session_id]["current_location_name"] = location_name
+            # Update player's x and y to the initial location of the new room
+            new_location = game_world.get_location(location_name)
+            if new_location and new_location.player_initial_location:
+                self.sessions[session_id]["player_x"] =                     new_location.player_initial_location["x"]
+                self.sessions[session_id]["player_y"] =                     new_location.player_initial_location["y"]
 
-    def get_current_location_description(self, session_id: str) -> str:
-        """Retrieves the description of the player's current location, including nearby features."""
+    def get_current_location_description(self, session_id: str) -> Dict[str, str]:
+        """Retrieves the description components of the player's current location."""
         session = self.sessions.get(session_id)
         if not session:
-            return "You are in an unfamiliar place."
+            return {"error": "Session not found."}
 
-        # Update NPC positions before generating description
-        self._update_npc_positions(session_id)
+        location_name = session.get("current_location_name")
+        location = game_world.get_location(location_name)
+        if not location:
+            return {"error": "You are in an unknown location."}
 
-        map_id = session.get("current_map_id", START_MAP_ID)
-        processed_map = build_map_data(map_id)
-        descriptions_data = processed_map.get("descriptions", {})
-        x, y = session.get("player_x"), session.get("player_y")
-
-        current_cell_description_info = descriptions_data.get((x, y), {})
-        
-        # Start with the base description for the current cell
-        description_parts = [current_cell_description_info.get("base_description", "")]
-
-        # Add feature description for the current cell if applicable
-        if "feature" in current_cell_description_info and current_cell_description_info["feature"] is not None:
-            description_parts.append(self._get_feature_description(current_cell_description_info["feature"]))
-
-        # Check for proximity descriptions for all maps
-        directions = {
-            (-1, 0): "north", (1, 0): "south", (0, -1): "west", (0, 1): "east",
-            (-1, -1): "northwest", (-1, 1): "northeast", (1, -1): "southwest", (1, 1): "southeast"
+        description_parts = {
+            "location_description": location.description,
+            "current_feature_description": "",
+            "adjacent_features_description": "",
+            "npcs_description": ""
         }
 
-        for dx, dy in directions.keys():
-            nx, ny = x + dx, y + dy
+        # Add feature description if player is on a feature
+        player_x = session["player_x"]
+        player_y = session["player_y"]
+        current_cell_char = location.raw_layout[player_y][player_x]
+        for feature in location.features:
+            if feature["name"] == location.map_key.get(current_cell_char):
+                description_parts["current_feature_description"] = f"Located here is {feature['description']}"
+                break
 
-            # Check boundaries
-            if not (0 <= nx < len(processed_map["layout"]) and 0 <= ny < len(processed_map["layout"][0])):
-                continue
+        # Add descriptions of notable features in adjacent squares
+        adjacent_features_list = []
+        directions = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
+        for direction, (dx, dy) in directions.items():
+            adj_x, adj_y = player_x + dx, player_y + dy
+            if 0 <= adj_y < len(location.raw_layout) and 0 <= adj_x < len(location.raw_layout[0]):
+                adj_cell_char = location.raw_layout[adj_y][adj_x]
+                for feature in location.features:
+                    if feature["name"] == location.map_key.get(adj_cell_char):
+                        adjacent_features_list.append(f"To the {direction} there is {feature['name']}.")
+                        break
+        if adjacent_features_list:
+            description_parts["adjacent_features_description"] = " ".join(adjacent_features_list)
 
-            # Get the character at the nearby position from the layout
-            nearby_char = processed_map["layout"][nx][ny]
-            nearby_element_properties = MAP_ELEMENTS.get(nearby_char)
-
-            if nearby_element_properties and nearby_element_properties["feature_id"] and nearby_element_properties["is_significant_for_proximity"]:
-                feature_id = nearby_element_properties["feature_id"]
-                feature_name = FEATURES[feature_id]["name"]
-                direction_word = directions[(dx, dy)]
-                description_parts.append(f"To the {direction_word}, you see a {feature_name}.")
-
-        # Filter out empty strings and join
-        full_description = ". ".join(filter(None, description_parts)).strip()
-        
         # Add NPC descriptions
-        npc_states = session.get("npc_states", {})
-        for npc_id, npc_state in npc_states.items():
-            if npc_state["map_id"] == map_id and npc_state["x"] == x and npc_state["y"] == y:
-                npc_info = CHARACTERS.get(npc_id)
-                if npc_info:
-                    full_description += f" You also see {npc_info['name']} here."
-                    print(f"NPC {npc_info['name']} found at player location ({x},{y}) on map {map_id}.")
+        npcs_in_location = self.get_npcs_in_location(session_id)
+        if npcs_in_location:
+            npc_descriptions = []
+            for npc in npcs_in_location:
+                npc_state = session["npc_states"][npc["id"]]
+                if npc_state["x"] == player_x and npc_state["y"] == player_y:
+                    npc_descriptions.append(f"{npc['name']}: {npc['short_description']}")
+            if npc_descriptions:
+                description_parts["npcs_description"] = f"You see:\n- {', '.join(npc_descriptions)}"
 
-        if not full_description:
-            return "You see nothing special here."
-        return full_description
-
-    def _update_npc_positions(self, session_id: str):
-        """Updates the positions of all NPCs based on their movement schedules."""
-        session = self.sessions.get(session_id)
-        if not session or "npc_states" not in session:
-            return
-
-        for npc_id, npc_state in session["npc_states"].items():
-            npc_data = CHARACTERS.get(npc_id)
-            if not npc_data or not npc_data["movement_schedule"]:
-                continue
-
-            # Move to the next point in the schedule
-            current_index = npc_state["movement_index"]
-            next_index = (current_index + 1) % len(npc_data["movement_schedule"])
-            
-            next_location = npc_data["movement_schedule"][next_index]
-            
-            npc_state["map_id"] = next_location["map_id"]
-            npc_state["x"] = next_location["x"]
-            npc_state["y"] = next_location["y"]
-            npc_state["movement_index"] = next_index
-
-    def set_current_location(self, session_id: str, x: int, y: int):
-        """Sets the player's current location coordinates for a given session."""
-        if session_id in self.sessions:
-            self.sessions[session_id]["player_x"] = x
-            self.sessions[session_id]["player_y"] = y
-
+        return description_parts
+    
     def get_inventory(self, session_id: str) -> List[str]:
         """Retrieves the player's inventory for a given session."""
         return self.sessions.get(session_id, {}).get("inventory", [])
@@ -207,9 +164,123 @@ class GameStateManager:
         if session_id in self.sessions:
             self.sessions[session_id]["gold"] = gold
 
+    def move_player(self, session_id: str, direction: str) -> str:
+        session = self.sessions.get(session_id)
+        if not session:
+            return "Session not found."
+
+        current_location_name = self.get_current_location_name(session_id)
+        location = game_world.get_location(current_location_name)
+
+        if not location or not location.raw_layout:
+            return "You are in an unknown location or there is no map to move within."
+
+        player_x = session["player_x"]
+        player_y = session["player_y"]
+
+        new_x, new_y = player_x, player_y
+
+        if direction == "north":
+            new_y -= 1
+        elif direction == "south":
+            new_y += 1
+        elif direction == "east":
+            new_x += 1
+        elif direction == "west":
+            new_x -= 1
+        else:
+            return "Invalid direction."
+
+        # Check boundaries
+        if not (0 <= new_y < len(location.raw_layout) and 
+                0 <= new_x < len(location.raw_layout[0])):
+            return "You cannot move in that direction. You would fall off the map!"
+
+        # Check for collisions with impassable elements (walls)
+        target_cell = location.raw_layout[new_y][new_x]
+        if target_cell in location.map_key and location.map_key[target_cell] == "Wall":
+            return "You hit a wall!"
+
+        session["player_x"] = new_x
+        session["player_y"] = new_y
+
+        response_message = f"You move {direction}."
+
+        # Get current feature description
+        current_cell_char = location.raw_layout[new_y][new_x]
+        for feature in location.features:
+            if feature["name"] == location.map_key.get(current_cell_char):
+                response_message += f"\nYou are standing on: {feature['description']}"
+                break
+
+        # Get adjacent feature names
+        adjacent_features_list = []
+        directions = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
+        for dir_name, (dx, dy) in directions.items():
+            adj_x, adj_y = new_x + dx, new_y + dy
+            if 0 <= adj_y < len(location.raw_layout) and 0 <= adj_x < len(location.raw_layout[0]):
+                adj_cell_char = location.raw_layout[adj_y][adj_x]
+                for feature in location.features:
+                    if feature["name"] == location.map_key.get(adj_cell_char):
+                        adjacent_features_list.append(f"To the {dir_name} is {feature['name']}.")
+                        break
+        if adjacent_features_list:
+            response_message += "\n" + " ".join(adjacent_features_list)
+
+        # Get NPCs in current square
+        npcs_in_location = self.get_npcs_in_location(session_id)
+        if npcs_in_location:
+            npc_descriptions = []
+            for npc in npcs_in_location:
+                npc_state = session["npc_states"][npc["id"]]
+                if npc_state["x"] == new_x and npc_state["y"] == new_y:
+                    npc_descriptions.append(f"{npc['name']}: {npc['short_description']}")
+            if npc_descriptions:
+                response_message += f"\nYou see:\n- {', '.join(npc_descriptions)}"
+
+        return response_message
+
+    def enter_exit(self, session_id: str) -> str:
+        session = self.sessions.get(session_id)
+        if not session:
+            return "Session not found."
+
+        current_location_name = self.get_current_location_name(session_id)
+        location = game_world.get_location(current_location_name)
+
+        if not location:
+            return "You are in an unknown location."
+
+        player_x = session["player_x"]
+        player_y = session["player_y"]
+
+        # Check if player is on an exit tile
+        # This assumes exits are marked in raw_layout and map_key, or are features
+        # For now, let's assume exits are defined in location.exits and we need to find a matching coordinate
+        # This is a simplified approach and might need more robust logic depending on how exits are defined.
+        
+        # For now, let's just check if there's any exit from the current location
+        if location.exits:
+            # For simplicity, let's just pick the first available exit for now
+            # A more complex game would require specifying which exit to take
+            for direction, exit_location_name in location.exits.items():
+                if exit_location_name:
+                    new_location = game_world.get_location(exit_location_name)
+                    if new_location:
+                        self.set_current_location_name(session_id, exit_location_name)
+                        # Reset player position to initial location in new room
+                        session["player_x"] = new_location.player_initial_location["x"]
+                        session["player_y"] = new_location.player_initial_location["y"]
+                        return f"You enter {new_location.name}. {new_location.description}"
+            return "There are no accessible exits from your current position."
+        else:
+            return "There are no exits from this location."
+
     def get_quest_log(self, session_id: str) -> List[str]:
         """Retrieves the player's quest log for a given session."""
-        return self.sessions.get(session_id, {}).get("quest_log", [])
+        return self.sessions.get(session_id, {}).get(
+            "quest_log", []
+        )
 
     def add_quest_to_log(self, session_id: str, quest: str):
         """Adds a quest to the player's quest log for a given session."""
@@ -228,143 +299,146 @@ class GameStateManager:
         if not session:
             return "Session ID is required for commands."
 
-        map_id = session["current_map_id"]
-        processed_map = build_map_data(map_id)
-        current_map_layout = processed_map["layout"]
-        current_map_exits = processed_map["exits"]
-        player_x = session["player_x"]
-        player_y = session["player_y"]
-
-        if command.startswith("go "):
-            direction = command[3:].strip()
-            
-            new_x, new_y = player_x, player_y
-
-            if direction == "north":
-                new_x -= 1
-            elif direction == "south":
-                new_x += 1
-            elif direction == "east":
-                new_y += 1
-            elif direction == "west":
-                new_y -= 1
-            else:
-                return "Invalid direction. Use north, south, east, or west."
-
-            # Check boundaries and impassable terrain
-            if 0 <= new_x < len(current_map_layout) and 0 <= new_y < len(current_map_layout[0]):
-                if current_map_layout[new_x][new_y] != '#':
-                    self.set_current_location(session_id, new_x, new_y)
-                    return f"You go {direction}. {self.get_current_location_description(session_id)}"
-                else:
-                    return "You can't go that way. It's blocked."
-            else:
-                return "You can't go that way. You've reached the edge of the world."
-
-        elif command == "enter":
-            if (player_x, player_y) in current_map_exits:
-                exit_info = current_map_exits[(player_x, player_y)]
-                new_map_id = exit_info["target_map_id"]
-                
-                # Check if the target map is an interior (has a 'D' for door)
-                if self.find_door_coordinates(new_map_id):
-                    door_coords = self.find_door_coordinates(new_map_id)
-                    session["current_map_id"] = new_map_id
-                    session["player_x"] = door_coords[0]
-                    session["player_y"] = door_coords[1]
-                    return f"You enter the {MAPS[new_map_id]['name']}. {self.get_current_location_description(session_id)}"
-                else:
-                    # If not an interior, use the target_x and target_y from the exit info
-                    if "target_x" in exit_info and "target_y" in exit_info:
-                        session["current_map_id"] = new_map_id
-                        session["player_x"] = exit_info["target_x"]
-                        session["player_y"] = exit_info["target_y"]
-                        return f"You exit to the {MAPS[new_map_id]['name']}. {self.get_current_location_description(session_id)}"
-                    else:
-                        # Handle cases where the exit is defined but no specific coordinates are given
-                        # Defaulting to a known safe point or the starting point of the new map
-                        new_map_data = build_map_data(new_map_id)
-                        session["current_map_id"] = new_map_id
-                        session["player_x"] = new_map_data.get("start_x", 0) # Fallback to 0
-                        session["player_y"] = new_map_data.get("start_y", 0) # Fallback to 0
-                        return f"You transition to {MAPS[new_map_id]['name']}. {self.get_current_location_description(session_id)}"
-            else:
-                return "There is nothing to enter here."
-
-        elif command == "inventory":
+        if command == "inventory":
             inventory = self.get_inventory(session_id)
             if inventory:
                 return f"Your inventory: {', '.join(inventory)}."
             else:
                 return "Your inventory is empty."
         elif command == "look":
-            return self.get_current_location_description(session_id)
+            description_parts = self.get_current_location_description(session_id)
+            response_message = description_parts["location_description"]
+            if description_parts.get("current_feature_description"):
+                response_message += f"\n{description_parts['current_feature_description']}"
+            if description_parts.get("adjacent_features_description"):
+                response_message += f"\n{description_parts['adjacent_features_description']}"
+            if description_parts.get("npcs_description"):
+                response_message += f"\n{description_parts['npcs_description']}"
+            return response_message
+        elif command.startswith("go "):
+            direction = command[3:].strip()
+            return self.move_player(session_id, direction)
         elif command.startswith("talk to "):
             npc_name = command[8:].strip()
             return self.initiate_dialogue(session_id, npc_name)
+        elif command == "enter":
+            return self.enter_exit(session_id)
         else:
             return "I don't understand that command."
 
-    def get_map_display(self, session_id: str) -> str:
-        """Generates a text-based display of the map with the player's current position."""
-        session = self.sessions.get(session_id)
-        if not session:
-            return ""
-            
-        map_id = session["current_map_id"]
-        processed_map = build_map_data(map_id)
-        current_map_layout = processed_map["layout"]
-        player_x = session["player_x"]
-        player_y = session["player_y"]
-        
-        map_display = []
-        for r_idx, row in enumerate(current_map_layout):
-            display_row = []
-            for c_idx, cell in enumerate(row):
-                if r_idx == player_x and c_idx == player_y:
-                    display_row.append('P') # Player's position
-                else:
-                    display_row.append(cell)
-            map_display.append("".join(display_row))
-        return "\n".join(map_display)
-
     def get_npc_info(self, npc_id: str) -> Dict[str, Any]:
-        return CHARACTERS.get(npc_id)
+        character = game_world.get_character(npc_id)
+        return character.to_dict() if character else None
 
     def get_npcs_in_location(self, session_id: str) -> List[Dict]:
         session = self.sessions.get(session_id)
         if not session:
             return []
 
-        player_x = session["player_x"]
-        player_y = session["player_y"]
-        map_id = session["current_map_id"]
+        current_location_name = self.get_current_location_name(session_id)
         npcs_here = []
+        logger.info(f"Checking for NPCs in location: {current_location_name}")
 
         for npc_id, npc_state in session["npc_states"].items():
-            if npc_state["map_id"] == map_id and npc_state["x"] == player_x and npc_state["y"] == player_y:
-                npc_info = CHARACTERS.get(npc_id)
+            logger.info(f"Processing NPC: {npc_id}, State: {npc_state}")
+            if npc_state["location"] == current_location_name:
+                npc_info = self.get_npc_info(npc_id)
                 if npc_info:
-                    npcs_here.append({"id": npc_id, "name": npc_info["name"]})
+                    npcs_here.append({"id": npc_id, "name": npc_info["name"], "short_description": npc_info["short_description"]})
+                    logger.info(f"Found NPC in location: {npc_info['name']}")
         
-        print(f"NPCs in location: {npcs_here}")
+        logger.info(f"NPCs found in {current_location_name}: {npcs_here}")
         return npcs_here
+
+    def get_map_display(self, session_id: str) -> Dict[str, Any]:
+        """Generates a structured display of the map for the current location."""
+        session = self.sessions.get(session_id)
+        if not session:
+            return {}
+
+        location_name = session.get("current_location_name")
+        location = game_world.get_location(location_name)
+        if not location or not location.raw_layout:
+            logger.warning(f"Map data not found for location: {location_name}")
+            return {}
+
+        player_x = session["player_x"]
+        player_y = session["player_y"]
+
+        map_grid = []
+        for r_idx, row in enumerate(location.raw_layout):
+            display_row = []
+            for c_idx, cell in enumerate(row):
+                has_npc = False
+                for npc_id, npc_state in session["npc_states"].items():
+                    if (npc_state["location"] == location_name and
+                        npc_state["x"] == c_idx and
+                        npc_state["y"] == r_idx):
+                        has_npc = True
+                        break
+                
+                tile_data = {
+                    "char": cell,
+                    "has_player": r_idx == player_y and c_idx == player_x,
+                    "has_npc": has_npc
+                }
+                display_row.append(tile_data)
+            map_grid.append(display_row)
+        
+        map_key = location.map_key if location.map_key else {}
+
+        return {
+            "grid": map_grid,
+            "key": map_key
+        }
 
     def initiate_dialogue(self, session_id: str, npc_name: str) -> str:
         session = self.sessions.get(session_id)
         if not session:
             return "Session not found."
 
-        player_x = session["player_x"]
-        player_y = session["player_y"]
-        map_id = session["current_map_id"]
+        current_location_name = self.get_current_location_name(session_id)
 
         for npc_id, npc_state in session["npc_states"].items():
-            if npc_state["map_id"] == map_id and npc_state["x"] == player_x and npc_state["y"] == player_y:
-                npc_info = CHARACTERS.get(npc_id)
+            if npc_state["location"] == current_location_name:
+                npc_info = self.get_npc_info(npc_id)
                 if npc_info and npc_info["name"].lower() == npc_name.lower():
-                    # Start conversation
                     session["conversation_partner"] = npc_id
                     return f"You begin a conversation with {npc_info['name']}."
         
         return f"There is no one named {npc_name} here."
+
+    def process_metadata(self, session_id: str, metadata: Dict[str, Any]):
+        """Processes metadata from Gemini response to update game state."""
+        if not metadata:
+            return
+
+        session = self.sessions.get(session_id)
+        if not session:
+            return
+
+        # Update player stats
+        if "player_stats" in metadata:
+            for stat, value in metadata["player_stats"].items():
+                if stat == "health":
+                    session["health"] = value
+                elif stat == "gold":
+                    session["gold"] = value
+
+        # Update inventory
+        if "inventory_add" in metadata:
+            for item in metadata["inventory_add"]:
+                self.add_item_to_inventory(session_id, item)
+        
+        if "inventory_remove" in metadata:
+            for item in metadata["inventory_remove"]:
+                self.remove_item_from_inventory(session_id, item)
+
+        # Update quest log
+        if "quest_log_add" in metadata:
+            for quest in metadata["quest_log_add"]:
+                self.add_quest_to_log(session_id, quest)
+
+        if "quest_log_remove" in metadata:
+            for quest in metadata["quest_log_remove"]:
+                self.remove_quest_from_log(session_id, quest)
