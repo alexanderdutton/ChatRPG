@@ -52,6 +52,7 @@ class Character:
 
 class GameWorld:
     def __init__(self):
+        self.name = None
         self.locations = {}
         self.characters = {}
 
@@ -88,10 +89,16 @@ def initialize_game_world(world_name: str = None):
     if not world_name:
         world_name = "Elodia" # Default world to load
 
+    game_world.name = world_name
+
     # Load from a specific world file
     file_path = os.path.join(os.path.dirname(__file__), "worlds", f"{world_name}.json")
-    with open(file_path, 'r') as f:
-        game_data = json.load(f)
+    try:
+        with open(file_path, 'r') as f:
+            game_data = json.load(f)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decoding error in {world_name}.json: {e}")
+        raise  # Re-raise the exception after logging
 
     for loc_data in game_data.get("locations", []):
         location = Location(
@@ -125,5 +132,3 @@ def initialize_game_world(world_name: str = None):
         logger.warning("No locations loaded into the game world.")
         return None
 
-# Initialize the game world when the module is loaded
-initialize_game_world()

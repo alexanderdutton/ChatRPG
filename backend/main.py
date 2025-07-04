@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import json
 import uuid
 from datetime import datetime
@@ -18,13 +19,20 @@ from gemini_image_generator import generate_and_save_image
 # Add the project root to the sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-# Configure logging to a file
+# Configure logging to a file with rotation
 log_file_path = os.path.join(os.path.dirname(__file__), "server.log")
+
+# Create a TimedRotatingFileHandler
+# Rotates daily (when='midnight'), keeps 7 backup files
+file_handler = TimedRotatingFileHandler(log_file_path, when="midnight", interval=1, backupCount=7)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# Configure the root logger
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file_path),
+        file_handler,
         logging.StreamHandler() # Also log to console
     ]
 )
@@ -64,6 +72,7 @@ class NPCResponse(BaseModel):
     dialogue: str
     player_name: str
     current_location: str
+    world_name: str
     inventory: List[str]
     health: int
     gold: int
@@ -125,6 +134,7 @@ async def interact_with_npc(user_input: UserInput):
         dialogue=gemini_dialogue,
         player_name=game_state_manager.get_player_name(session_id),
         current_location=game_state_manager.get_current_location_name(session_id),
+        world_name=game_state_manager.get_world_name(),
         inventory=game_state_manager.get_inventory(session_id),
         health=game_state_manager.get_health(session_id),
         gold=game_state_manager.get_gold(session_id),
@@ -157,6 +167,7 @@ async def handle_command(command_input: CommandInput):
         dialogue=command_response_text,
         player_name=game_state_manager.get_player_name(session_id),
         current_location=game_state_manager.get_current_location_name(session_id),
+        world_name=game_state_manager.get_world_name(),
         inventory=game_state_manager.get_inventory(session_id),
         health=game_state_manager.get_health(session_id),
         gold=game_state_manager.get_gold(session_id),
@@ -180,7 +191,8 @@ async def start_game(start_input: StartGameInput):
         logger.info(f"Session {session_id} already exists. Rejoining.")
     else:
         logger.info(f"Creating new session: {session_id}")
-        initialize_game_world("Elodia") # Ensure Elodia world is loaded on start
+        # Ensure the default world is loaded when a new session is created
+        initialize_game_world("Elodia")
         game_state_manager.create_session(session_id,
                                           player_name=start_input.player_name)
 
@@ -200,6 +212,7 @@ async def start_game(start_input: StartGameInput):
         dialogue=initial_dialogue,
         player_name=game_state_manager.get_player_name(session_id),
         current_location=game_state_manager.get_current_location_name(session_id),
+        world_name=game_state_manager.get_world_name(),
         inventory=game_state_manager.get_inventory(session_id),
         health=game_state_manager.get_health(session_id),
         gold=game_state_manager.get_gold(session_id),

@@ -28,12 +28,18 @@ class GameStateManager:
             first_location_name = list(game_world.locations.keys())[0]
             first_location = game_world.get_location(first_location_name)
 
+            player_start_x = 0
+            player_start_y = 0
+            if first_location and first_location.player_initial_location:
+                player_start_x = first_location.player_initial_location.get("x", 0)
+                player_start_y = first_location.player_initial_location.get("y", 0)
+
             self.sessions[session_id] = {
                 "conversation_history": [],
                 "player_name": player_name,
                 "current_location_name": first_location_name,
-                "player_x": first_location.player_initial_location["x"],
-                "player_y": first_location.player_initial_location["y"],
+                "player_x": player_start_x,
+                "player_y": player_start_y,
                 "inventory": [],
                 "health": 100,
                 "gold": 0,
@@ -67,6 +73,10 @@ class GameStateManager:
     def get_current_location_name(self, session_id: str) -> str:
         """Retrieves the player's current location name for a given session."""
         return self.sessions.get(session_id, {}).get("current_location_name", "Unknown Location")
+
+    def get_world_name(self) -> str:
+        """Retrieves the current world name."""
+        return game_world.name
 
     def set_current_location_name(self, session_id: str, location_name: str):
         """Sets the player's current location name for a given session."""

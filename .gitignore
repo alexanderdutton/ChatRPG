@@ -19,3 +19,6 @@ Thumbs.db
 *.temp
 *.png # Temporarily exclude generated images until stable
 error.txt
+
+# Ignore all files in backend/worlds/
+backend/worlds/*
