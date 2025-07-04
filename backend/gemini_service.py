@@ -1,5 +1,6 @@
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from typing import List, Dict, Tuple, Any
 import logging
 import json
@@ -12,7 +13,7 @@ API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     raise ValueError("GEMINI_API_KEY environment variable not set.")
 
-genai.configure(api_key=API_KEY)
+client = genai.Client(api_key=API_KEY)
 
 # Print module paths for debugging
 print(f"Path for google.generativeai: {genai.__file__}")
@@ -44,20 +45,23 @@ def extract_json_metadata(text: str) -> Tuple[str, Dict[str, Any]]:
 async def get_gemini_response(conversation_history: List[Dict],
                                 system_instruction: str = None) -> Tuple[str, Dict[str, Any]]:
     try:
-        model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash-latest',
-            system_instruction=system_instruction
-        )
-
         formatted_history = []
         for entry in conversation_history:
             formatted_parts = [
-                genai.types.text_content.create(text=part_text)
+                types.Part(text=part_text)
                 for part_text in entry["parts"]
             ]
-            formatted_history.append(genai.types.Content(role=entry["role"], parts=formatted_parts))
+            formatted_history.append(types.Content(role=entry["role"], parts=formatted_parts))
 
-        response = await model.generate_content_async(formatted_history)
+        config = None
+        if system_instruction:
+            config = types.GenerateContentConfig(system_instruction=system_instruction)
+
+        response = client.models.generate_content(
+            model="gemini-1.5-flash-latest",
+            contents=formatted_history,
+            config=config
+        )
         
         dialogue, metadata = extract_json_metadata(response.text)
         return dialogue, metadata
@@ -82,7 +86,7 @@ async def generate_game_data(request: str) -> Dict[str, Any]:
         prompt = prompt_template.replace("[INSERT REQUEST HERE]", request)
 
         # Call the Gemini API
-        generation_config = genai.types.GenerationConfig(
+        generation_config = types.GenerationConfig(
             temperature=0.7,
             top_p=0.95,
             top_k=40,
@@ -98,12 +102,12 @@ async def generate_game_data(request: str) -> Dict[str, Any]:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT",
              "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
         ]
-        model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash-latest',
+        response = client.models.generate_content(
+            model="gemini-1.5-flash-latest",
+            contents=prompt,
             generation_config=generation_config,
             safety_settings=safety_settings
         )
-        response = await model.generate_content_async(prompt)
         
         # Extract and return the JSON data
         _, metadata = extract_json_metadata(response.text)

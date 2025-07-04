@@ -358,8 +358,11 @@ class GameStateManager:
 
         location_name = session.get("current_location_name")
         location = game_world.get_location(location_name)
-        if not location or not location.raw_layout:
-            logger.warning(f"Map data not found for location: {location_name}")
+        logger.info(f"get_map_display: Location retrieved: {location.name if location else 'None'}")
+        if location and location.raw_layout:
+            logger.info(f"get_map_display: raw_layout present. Length: {len(location.raw_layout)}")
+        else:
+            logger.warning(f"Map data not found or raw_layout empty for location: {location_name}")
             return {}
 
         player_x = session["player_x"]

@@ -18,3 +18,4 @@ Thumbs.db
 # Generated files
 *.temp
 *.png # Temporarily exclude generated images until stable
+error.txt
