@@ -5,6 +5,8 @@ from typing import List, Dict, Tuple, Any
 import logging
 import json
 import re
+from .models import GameWorldData
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ async def get_gemini_response(conversation_history: List[Dict],
             config = types.GenerateContentConfig(system_instruction=system_instruction)
 
         response = client.models.generate_content(
-            model="gemini-1.5-flash-latest",
+            model="gemini-flash-latest",
             contents=formatted_history,
             config=config
         )
@@ -76,12 +78,21 @@ async def generate_game_data(request: str) -> Dict[str, Any]:
     """Generates new game data using the Gemini API and the prompt template.
     """
     try:
-        # Load the prompt template
-        template_path = os.path.join(os.path.dirname(__file__),
-                                     "gemini_prompt_template.txt")
-        with open(template_path, 'r') as f:
-            prompt_template = f.read()
+        # Generate the prompt template dynamically from the Pydantic model
+        json_schema_template = GameWorldData.schema_json(indent=2)
+        prompt_template = f"""
+You are a creative assistant for a text-based adventure game. Your task is to generate data for a new game world, including locations and characters. The output must be in JSON format, following the template provided below. You must always include at least one location, and each location must have a 'characters' array, even if it's empty. Each location must also have an ASCII map with a key, an initial player starting point, and at least one entrance/exit.
 
+**Game World Template (JSON Schema):**
+
+```json
+{json_schema_template}
+```
+
+Please generate new game data based on the following request:
+
+[INSERT REQUEST HERE]
+"""
         # Fill in the request
         prompt = prompt_template.replace("[INSERT REQUEST HERE]", request)
 
@@ -103,7 +114,7 @@ async def generate_game_data(request: str) -> Dict[str, Any]:
              "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
         ]
         response = client.models.generate_content(
-            model="gemini-1.5-flash-latest",
+            model="gemini-flash-latest",
             contents=prompt,
             generation_config=generation_config,
             safety_settings=safety_settings
@@ -111,10 +122,50 @@ async def generate_game_data(request: str) -> Dict[str, Any]:
         
         # Extract and return the JSON data
         _, metadata = extract_json_metadata(response.text)
-        return metadata
+        try:
+            validated_data = GameWorldData.parse_obj(metadata)
+            return validated_data.dict()
+        except ValidationError as e:
+            logger.error(f"Generated game data failed Pydantic validation: {e}")
+            return {}
     except Exception as e:
         logger.error(
             f"Error calling Gemini API for game data generation: "
             f"{type(e).__name__}: {e}"
         )
         return {}
+
+async def generate_item_details(item_name: str) -> str:
+    """Generates a creative description for an item."""
+    try:
+        prompt = f"""
+        Describe the item '{item_name}' for a fantasy RPG.
+        Include its appearance, potential magical properties, and a bit of lore.
+        Keep it concise (under 100 words).
+        """
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=prompt
+        )
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Error generating item details: {e}")
+        return f"A simple {item_name}."
+
+async def generate_quest(context: str) -> str:
+    """Generates a dynamic quest based on the current context."""
+    try:
+        prompt = f"""
+        Generate a short, engaging quest hook for a fantasy RPG player.
+        Context: {context}
+        The quest should be something they can start immediately.
+        Keep it concise (under 50 words).
+        """
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=prompt
+        )
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Error generating quest: {e}")
+        return "You hear rumors of trouble nearby, but nothing specific."

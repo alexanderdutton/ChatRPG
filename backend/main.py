@@ -11,10 +11,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from game_state_manager import GameStateManager
-from game_world import initialize_game_world
-from gemini_service import get_gemini_response, generate_game_data
-from gemini_image_generator import generate_and_save_image
+from .game_state_manager import GameStateManager
+from .game_world import initialize_game_world
+from .gemini_service import get_gemini_response, generate_game_data
+from .gemini_image_generator import generate_and_save_image
 
 # Add the project root to the sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -92,8 +92,7 @@ async def interact_with_npc(user_input: UserInput):
         raise HTTPException(status_code=404,
                             detail="Session not found. Please start a new game.")
 
-    session = game_state_manager.sessions[session_id]
-    npc_id = session.get("conversation_partner")
+    npc_id = game_state_manager.get_conversation_partner(session_id)
 
     if not npc_id:
         raise HTTPException(status_code=400, detail="Not in a conversation.")
@@ -157,7 +156,7 @@ async def handle_command(command_input: CommandInput):
         game_state_manager.create_session(session_id)
         logger.info(f"Created session {session_id} for command.")
 
-    command_response_text = game_state_manager.process_command(session_id,
+    command_response_text = await game_state_manager.process_command(session_id,
                                                                 command_input.command)
 
     npcs_in_location = game_state_manager.get_npcs_in_location(session_id)
@@ -272,7 +271,8 @@ async def load_world(input: LoadWorldInput):
             # This assumes there's always an active session when load_world is called.
             # If not, we'd need to create one or handle the error.
             # Let's get the first session if any, or assume a new one for now.
-            session_id_to_update = list(game_state_manager.sessions.keys())[0] if game_state_manager.sessions else None
+            # Let's get the first session if any, or assume a new one for now.
+            session_id_to_update = game_state_manager.get_active_session_id()
             if session_id_to_update:
                 game_state_manager.set_current_location_name(session_id_to_update, first_location_name)
                 logger.info(f"Updated session {session_id_to_update} to location: {first_location_name}")

@@ -48,7 +48,8 @@ You are a creative assistant for a text-based adventure game. Your task is to ge
           "description": "A detailed description of the character's appearance, personality, and background.",
           "personality_prompt": "A prompt for Gemini to use when generating dialogue for this character.",
           "x": 0,
-          "y": 0
+          "y": 0,
+          "short_description": "A brief, one-sentence description of the character for quick reference."
         }
       ]
     }

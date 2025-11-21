@@ -1,73 +1,32 @@
 import os
 import json
 import logging
+from typing import Dict, List, Any
+from pydantic import ValidationError
+
+from .models import GameWorldData, Location, Character
 
 logger = logging.getLogger(__name__)
 
 
-class Location:
-    def __init__(self, name, description, exits=None, features=None,
-                 raw_layout=None, map_key=None, player_initial_location=None):
-        self.name = name
-        self.description = description
-        self.exits = exits if exits is not None else {}
-        self.features = features if features is not None else []
-        self.raw_layout = raw_layout if raw_layout is not None else []
-        self.map_key = map_key if map_key is not None else {}
-        self.player_initial_location = player_initial_location if player_initial_location is not None else {}
-
-    def to_dict(self):
-        return {
-            "name": self.name,
-            "description": self.description,
-            "exits": self.exits,
-            "features": self.features,
-            "raw_layout": self.raw_layout,
-            "map_key": self.map_key,
-            "player_initial_location": self.player_initial_location
-        }
-
-class Character:
-    def __init__(self, name, race, occupation, description, personality_prompt, x, y, short_description=None):
-        self.name = name
-        self.race = race
-        self.occupation = occupation
-        self.description = description
-        self.personality_prompt = personality_prompt
-        self.x = x
-        self.y = y
-        self.short_description = short_description if short_description is not None else ""
-
-    def to_dict(self):
-        return {
-            "name": self.name,
-            "race": self.race,
-            "occupation": self.occupation,
-            "description": self.description,
-            "personality_prompt": self.personality_prompt,
-            "x": self.x,
-            "y": self.y,
-            "short_description": self.short_description
-        }
-
 class GameWorld:
     def __init__(self):
-        self.name = None
-        self.locations = {}
-        self.characters = {}
+        self.name: str | None = None
+        self.locations: Dict[str, Location] = {}
+        self.characters: Dict[str, Dict[str, Character]] = {}
 
-    def add_location(self, location):
+    def add_location(self, location: Location):
         self.locations[location.name] = location
 
-    def add_character(self, character, location_name):
+    def add_character(self, character: Character, location_name: str):
         if location_name not in self.characters:
             self.characters[location_name] = {}
         self.characters[location_name][character.name] = character
 
-    def get_location(self, name):
+    def get_location(self, name: str) -> Location | None:
         return self.locations.get(name)
 
-    def get_character(self, name, location_name=None):
+    def get_character(self, name: str, location_name: str | None = None) -> Character | None:
         if location_name:
             return self.characters.get(location_name, {}).get(name)
         else:
@@ -80,7 +39,7 @@ class GameWorld:
 # Initializing the game world
 game_world = GameWorld()
 
-def initialize_game_world(world_name: str = None):
+def initialize_game_world(world_name: str | None = None):
     """Loads all game data and populates the game world."""
     game_world.locations = {}  # Clear existing data
     game_world.characters = {} # Clear existing data
@@ -95,33 +54,27 @@ def initialize_game_world(world_name: str = None):
     file_path = os.path.join(os.path.dirname(__file__), "worlds", f"{world_name}.json")
     try:
         with open(file_path, 'r') as f:
-            game_data = json.load(f)
+            game_data_dict = json.load(f)
+        
+        # Validate and load data using Pydantic model
+        game_data = GameWorldData.parse_obj(game_data_dict)
+
+    except FileNotFoundError:
+        logger.error(f"World file not found: {file_path}")
+        return None
     except json.JSONDecodeError as e:
         logger.error(f"JSON decoding error in {world_name}.json: {e}")
         raise  # Re-raise the exception after logging
+    except ValidationError as e:
+        logger.error(f"Validation error for world data in {world_name}.json: {e}")
+        raise # Re-raise the exception after logging
 
-    for loc_data in game_data.get("locations", []):
-        location = Location(
-            name=loc_data.get("name"),
-            description=loc_data.get("description"),
-            exits=loc_data.get("exits"),
-            features=loc_data.get("features"),
-            raw_layout=loc_data.get("raw_layout"),
-            map_key=loc_data.get("map_key"),
-            player_initial_location=loc_data.get("player_initial_location")
-        )
+    game_world.name = game_data.world
+
+    for location in game_data.locations:
         game_world.add_location(location)
 
-        for char_data in loc_data.get("characters", []):
-            character = Character(
-                name=char_data.get("name"),
-                race=char_data.get("race"),
-                occupation=char_data.get("occupation"),
-                description=char_data.get("description"),
-                personality_prompt=char_data.get("personality_prompt"),
-                x=char_data.get("x"),
-                y=char_data.get("y"),
-                short_description=char_data.get("short_description", ""))
+        for character in location.characters:
             game_world.add_character(character, location.name)
 
     if game_world.locations:

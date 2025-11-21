@@ -27,8 +27,8 @@
             "exits": {
                 "north": "Whispering Woods",
                 "south": "Riverford",
-                "east": null,
-                "west": null
+                "east": "",
+                "west": ""
             },
             "features": [
                 {
@@ -48,7 +48,8 @@
                     "description": "A kind-faced woman with bright eyes and silver hair, known for her knowledge of healing herbs and potions. She wears a simple green dress and always carries a small pouch filled with dried plants.",
                     "personality_prompt": "Elara is kind and helpful, but also cautious and wise. She speaks in a gentle, reassuring tone, offering advice and remedies to those who seek her help.  She is deeply connected to nature and values balance and harmony.",
                     "x": 1,
-                    "y": 2
+                    "y": 2,
+                    "short_description": "A kind herbalist with silver hair."
                 },
                 {
                     "name": "Brom",
@@ -57,7 +58,8 @@
                     "description": "A burly dwarf with a booming laugh and a beard as long as his hammer. He's known for his sturdy and reliable craftsmanship.  His face is smudged with soot, and his hands are calloused from years of hard work.",
                     "personality_prompt": "Brom is gruff but ultimately good-hearted. He values honesty and hard work above all else. He's quick to offer a helping hand, but equally quick to criticize shoddy work.",
                     "x": 4,
-                    "y": 3
+                    "y": 3,
+                    "short_description": "A burly dwarf blacksmith."
                 }
             ]
         }

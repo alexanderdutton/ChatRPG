@@ -1,0 +1,3 @@
+Fix: Adjust NPC portrait and chat window sizing
+
+Ensured NPC portrait panel and chat window are of equal height and properly handle content overflow. The portrait now scales correctly within its container without pushing other elements.
