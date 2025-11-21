@@ -5,9 +5,10 @@
     --accent-color: #bb86fc;
     --secondary-color: #03dac6;
     --border-color: #333;
+    --danger-color: #cf6679;
     --font-main: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     --font-mono: 'Consolas', 'Courier New', monospace;
-    
+
     --shadow-card: 0 4px 6px rgba(0, 0, 0, 0.3);
     --radius-md: 8px;
 }
@@ -27,24 +28,22 @@ body {
     overflow: hidden;
 }
 
+/* Layout Structure */
 .app-container {
-    display: grid;
-    grid-template-columns: 300px 1fr 300px;
-    grid-template-rows: 60px 1fr;
+    display: flex;
+    flex-direction: column;
     height: 100vh;
-    gap: 1px;
-    background-color: var(--border-color);
 }
 
-/* Header */
 .header {
-    grid-column: 1 / -1;
+    height: 60px;
     background-color: var(--card-bg);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 20px;
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .header h1 {
@@ -52,88 +51,65 @@ body {
     color: var(--accent-color);
 }
 
-.status-indicator {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background-color: #444;
+.game-view {
+    display: grid;
+    grid-template-columns: 350px 1fr 300px;
+    /* Left (Chat), Center (Map/Portrait), Right (Stats/Actions) */
+    flex: 1;
+    overflow: hidden;
+    transition: opacity 0.3s ease;
 }
-.status-ok { background-color: #4caf50; box-shadow: 0 0 8px #4caf50; }
-.status-error { background-color: #f44336; }
 
-/* Sidebar (Left - Stats) */
-.sidebar-left {
-    background-color: var(--card-bg);
-    padding: 20px;
-    overflow-y: auto;
+.game-view.hidden {
+    display: none !important;
+}
+
+/* Panels */
+.panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     border-right: 1px solid var(--border-color);
+    background-color: var(--bg-color);
 }
 
-.stat-card {
-    background: rgba(255, 255, 255, 0.05);
-    padding: 15px;
-    border-radius: var(--radius-md);
-    margin-bottom: 20px;
+.panel:last-child {
+    border-right: none;
 }
 
-.stat-card h3 {
+.panel-header {
+    padding: 10px 15px;
+    background-color: var(--card-bg);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: bold;
     color: var(--secondary-color);
-    margin-bottom: 10px;
-    font-size: 0.9rem;
     text-transform: uppercase;
+    font-size: 0.85rem;
     letter-spacing: 1px;
 }
 
-.stat-row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 5px;
-    font-size: 0.9rem;
+.left-panel {
+    background-color: var(--bg-color);
 }
 
-/* Main Area (Center - Chat & Map) */
-.main-content {
-    background-color: var(--bg-color);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+.center-panel {
+    background-color: #0a0a0a;
+    /* Darker for immersion */
+    align-items: center;
+    justify-content: center;
     position: relative;
 }
 
-.tabs {
-    display: flex;
+.right-panel {
     background-color: var(--card-bg);
-    border-bottom: 1px solid var(--border-color);
+    /* Slightly lighter for UI controls */
+    padding: 20px;
+    overflow-y: auto;
+    gap: 20px;
 }
 
-.tab-btn {
-    padding: 10px 20px;
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-weight: bold;
-    transition: color 0.3s;
-}
-
-.tab-btn.active {
-    color: var(--accent-color);
-    border-bottom: 2px solid var(--accent-color);
-}
-
-.tab-content {
-    flex: 1;
-    overflow: hidden;
-    display: none;
-    flex-direction: column;
-}
-
-.tab-content.active {
-    display: flex;
-}
-
-/* Chat Area */
-#chat-container {
+/* Chat & Log */
+.log-container {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
@@ -143,13 +119,12 @@ body {
 }
 
 .message {
-    max-width: 80%;
+    max-width: 90%;
     padding: 10px 15px;
     border-radius: var(--radius-md);
     animation: fadeIn 0.3s ease;
+    line-height: 1.5;
 }
-
-@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
 .message.user {
     align-self: flex-end;
@@ -157,7 +132,7 @@ body {
     color: #000;
 }
 
-.message.npc {
+.message.model {
     align-self: flex-start;
     background-color: #333;
     border-left: 3px solid var(--secondary-color);
@@ -167,11 +142,15 @@ body {
     align-self: center;
     color: #888;
     font-style: italic;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.05);
+    width: 100%;
 }
 
+/* Input Area */
 .input-area {
-    padding: 20px;
+    padding: 15px;
     background-color: var(--card-bg);
     border-top: 1px solid var(--border-color);
     display: flex;
@@ -192,8 +171,9 @@ body {
     border-color: var(--accent-color);
 }
 
+/* Buttons */
 .btn {
-    padding: 0 20px;
+    padding: 10px 20px;
     border-radius: var(--radius-md);
     border: none;
     background-color: var(--accent-color);
@@ -207,94 +187,197 @@ body {
     filter: brightness(1.1);
 }
 
-/* Map Area */
+.btn-danger {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+/* Map Styling */
 #map-container {
-    flex: 1;
     display: flex;
-    align-items: center;
     justify-content: center;
-    background-color: #000;
-    padding: 20px;
+    align-items: center;
+    flex: 1;
+    width: 100%;
+    overflow: hidden;
 }
 
 #game-map {
-    font-family: var(--font-mono);
-    line-height: 1;
-    background-color: #111;
+    display: grid;
+    gap: 2px;
     padding: 20px;
-    border-radius: var(--radius-md);
+    background-color: #000;
     border: 1px solid #333;
-    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    border-radius: 4px;
 }
 
-.map-row { display: flex; }
+.map-row {
+    display: flex;
+    gap: 2px;
+}
+
 .map-tile {
-    width: 24px;
-    height: 24px;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
+    background-color: #222;
     color: #555;
+    font-family: var(--font-mono);
+    font-size: 1.2rem;
+    border-radius: 2px;
 }
 
-.tile-player { color: var(--accent-color); text-shadow: 0 0 5px var(--accent-color); font-weight: bold; }
-.tile-npc { color: var(--secondary-color); font-weight: bold; }
-.tile-wall { color: #333; }
-.tile-floor { color: #222; }
-.tile-feature { color: #ff9800; }
-
-/* Sidebar (Right - Actions & Context) */
-.sidebar-right {
-    background-color: var(--card-bg);
-    padding: 20px;
-    border-left: 1px solid var(--border-color);
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
+.tile-player {
+    background-color: var(--accent-color) !important;
+    color: #000 !important;
+    box-shadow: 0 0 10px var(--accent-color);
+    z-index: 10;
+    font-weight: bold;
 }
 
-.portrait-container {
-    width: 100%;
-    aspect-ratio: 1;
-    background-color: #000;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    border: 1px solid var(--border-color);
+.tile-npc {
+    background-color: var(--secondary-color);
+    color: #000;
+    border-radius: 50%;
 }
 
-.portrait-container img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+.tile-wall {
+    background-color: #111;
+    color: #333;
+}
+
+.tile-floor {
+    color: #333;
+}
+
+.tile-feature {
+    color: #ffb74d;
+}
+
+/* D-Pad */
+.d-pad-container {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 8px;
 }
 
 .d-pad {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 5px;
-    max-width: 150px;
-    margin: 0 auto;
 }
 
 .d-pad button {
-    aspect-ratio: 1;
+    width: 40px;
+    height: 40px;
     background-color: #333;
-    border: none;
+    border: 1px solid #555;
     color: white;
     border-radius: 4px;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.d-pad button:hover { background-color: #444; }
+.d-pad button:hover {
+    background-color: #555;
+}
 
-/* Responsive */
-@media (max-width: 900px) {
-    .app-container {
-        grid-template-columns: 1fr;
-        grid-template-rows: 60px 1fr auto;
+/* Interaction Mode Styling */
+.interaction-center {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 40px;
+    gap: 30px;
+}
+
+.portrait-wrapper {
+    width: 300px;
+    height: 300px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 4px solid var(--accent-color);
+    box-shadow: 0 0 30px rgba(187, 134, 252, 0.3);
+    background-color: #000;
+}
+
+.portrait-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.dialogue-bubble {
+    background-color: rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    border-radius: 20px;
+    border-top-left-radius: 0;
+    max-width: 600px;
+    color: #fff;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    position: relative;
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Stats & Cards */
+.stat-card {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 15px;
+    border-radius: var(--radius-md);
+}
+
+.stat-card h3 {
+    color: var(--secondary-color);
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 5px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: #ccc;
+}
+
+/* Status Indicator */
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #444;
+}
+
+.status-ok {
+    background-color: #4caf50;
+    box-shadow: 0 0 5px #4caf50;
+}
+
+.status-error {
+    background-color: #f44336;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
     }
-    .sidebar-left, .sidebar-right {
-        display: none; /* Hide sidebars on mobile for now, or make them collapsible */
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
     }
-    /* Add mobile menu logic later */
 }

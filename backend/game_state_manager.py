@@ -33,9 +33,16 @@ class GameStateManager:
                 quest_log TEXT,
                 npc_states TEXT,
                 conversation_history TEXT,
-                conversation_partner TEXT
+                conversation_partner TEXT,
+                game_mode TEXT
             )
         ''')
+        # Attempt to add game_mode column if it doesn't exist (migration)
+        try:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN game_mode TEXT DEFAULT 'EXPLORATION'")
+        except sqlite3.OperationalError:
+            pass # Column likely already exists
+
         conn.commit()
         conn.close()
 
@@ -102,11 +109,11 @@ class GameStateManager:
         cursor.execute('''
             INSERT INTO sessions (
                 session_id, player_name, current_location_name, player_x, player_y,
-                inventory, health, gold, quest_log, npc_states, conversation_history, conversation_partner
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                inventory, health, gold, quest_log, npc_states, conversation_history, conversation_partner, game_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             session_id, player_name, first_location_name, player_start_x, player_start_y,
-            json.dumps([]), 100, 0, json.dumps([]), json.dumps(npc_states), json.dumps([]), None
+            json.dumps([]), 100, 0, json.dumps([]), json.dumps(npc_states), json.dumps([]), None, "EXPLORATION"
         ))
         conn.commit()
         conn.close()
@@ -376,6 +383,23 @@ class GameStateManager:
         if not session:
             return "Session ID is required for commands."
 
+        # Check Game Mode
+        game_mode = self.get_game_mode(session_id)
+        
+        if game_mode == "INTERACTION":
+            if command in ["leave", "exit", "bye", "quit"]:
+                self.end_interaction(session_id)
+                return "You end the conversation."
+            else:
+                # In interaction mode, we might want to treat other commands as dialogue or just block them.
+                # For now, let's block movement and standard commands, but maybe allow inventory?
+                if command == "inventory":
+                     inventory = self.get_inventory(session_id)
+                     return f"Your inventory: {', '.join(inventory)}." if inventory else "Your inventory is empty."
+                
+                return "You are in a conversation. Type 'leave' to exit."
+
+        # EXPLORATION MODE
         if command == "inventory":
             inventory = self.get_inventory(session_id)
             if inventory:
@@ -400,15 +424,21 @@ class GameStateManager:
             return self.initiate_dialogue(session_id, npc_name)
         elif command == "enter":
             return self.enter_exit(session_id)
-        elif command.startswith("inspect "):
-            item_name = command[8:].strip()
+        elif command.startswith("examine ") or command.startswith("look "):
+            target_name = command.split(" ", 1)[1].strip()
+            # Check inventory first
             inventory = self.get_inventory(session_id)
-            # Simple check if item is in inventory (partial match)
-            found_item = next((i for i in inventory if item_name.lower() in i.lower()), None)
+            found_item = next((i for i in inventory if target_name.lower() in i.lower()), None)
             if found_item:
                 return await generate_item_details(found_item)
-            else:
-                return "You don't have that item."
+            
+            # Check NPCs in location
+            npcs = self.get_npcs_in_location(session_id)
+            found_npc = next((n for n in npcs if target_name.lower() in n["name"].lower()), None)
+            if found_npc:
+                return f"{found_npc['name']}: {found_npc['short_description']}"
+            
+            return f"You don't see '{target_name}' here."
         elif command == "rumors":
             location_desc = self.get_current_location_description(session_id)
             context = f"Location: {location_desc['location_description']}. {location_desc['npcs_description']}"
@@ -491,9 +521,24 @@ class GameStateManager:
                 npc_info = self.get_npc_info(npc_id)
                 if npc_info and npc_info["name"].lower() == npc_name.lower():
                     self._update_session_field(session_id, "conversation_partner", npc_id)
+                    self.set_game_mode(session_id, "INTERACTION")
                     return f"You begin a conversation with {npc_info['name']}."
         
         return f"There is no one named {npc_name} here."
+
+    def end_interaction(self, session_id: str):
+        """Ends the current interaction and switches back to EXPLORATION mode."""
+        self._update_session_field(session_id, "conversation_partner", None)
+        self.set_game_mode(session_id, "EXPLORATION")
+
+    def get_game_mode(self, session_id: str) -> str:
+        """Retrieves the current game mode."""
+        data = self._get_session_data(session_id)
+        return data.get("game_mode", "EXPLORATION") if data else "EXPLORATION"
+
+    def set_game_mode(self, session_id: str, mode: str):
+        """Sets the current game mode."""
+        self._update_session_field(session_id, "game_mode", mode)
 
     def get_conversation_partner(self, session_id: str) -> str | None:
         data = self._get_session_data(session_id)

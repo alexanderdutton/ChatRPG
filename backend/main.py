@@ -9,6 +9,8 @@ from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .game_state_manager import GameStateManager
@@ -47,15 +49,52 @@ app = FastAPI(
 )
 
 # CORS Middleware
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8001", "http://127.0.0.1:8001"],  # Specific origins
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
-    allow_methods=["*"]  # Allows all methods
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+# Mount static files
+# We mount it to /static first to avoid conflicts, but we also want to serve index.html at root.
+# Actually, let's mount the whole frontend dir to root, but we need to be careful about API routes.
+# FastAPI matches routes in order. So if we define API routes first, they take precedence.
+# However, mounting to "/" usually catches everything.
+# Better approach: Mount assets to specific paths if possible, or use a catch-all for the SPA.
+# Since this is simple:
+# 1. Mount /portraits to frontend/portraits
+# 2. Mount /style.css specifically or just serve static files.
+# Let's mount the entire frontend directory to serve static assets.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+frontend_dir = os.path.join(project_root, "frontend")
+
+app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+app.mount("/portraits", StaticFiles(directory=os.path.join(frontend_dir, "portraits")), name="portraits")
+
+@app.get("/")
+async def read_root():
+    return FileResponse(os.path.join(frontend_dir, "index.html"))
+
+@app.get("/style.css")
+async def read_css():
+    return FileResponse(os.path.join(frontend_dir, "style.css"))
+
+@app.get("/index.html")
+async def read_index():
+    return FileResponse(os.path.join(frontend_dir, "index.html"))
+
+@app.get("/test")
+async def test_endpoint():
+    return {"message": "Server is reloading!"}
 
 # Initialize game state manager (in-memory for simplicity, consider a DB for production)
 game_state_manager = GameStateManager()
+
+# Initialize the game world data
+initialize_game_world("Elodia")
 
 # --- Pydantic Models ---
 
@@ -80,6 +119,7 @@ class NPCResponse(BaseModel):
     map_display: Optional[Dict] = None
     character_portrait: Optional[str] = None
     npcs_in_location: Optional[List[Dict]] = None
+    game_mode: str = "EXPLORATION"
 
 # --- API Endpoints ---
 
@@ -108,7 +148,9 @@ async def interact_with_npc(user_input: UserInput):
 
     # Add personality prompt if history is short
     # Add personality prompt as system instruction
+    player_name = game_state_manager.get_player_name(session_id)
     system_instruction = (f"You are {npc_info['name']}. "
+                          f"You are talking to {player_name}. "
                           f"{npc_info['personality_prompt']}")
 
     conversation_history.append({"role": "user", "parts": [user_input.message]})
@@ -139,7 +181,8 @@ async def interact_with_npc(user_input: UserInput):
         gold=game_state_manager.get_gold(session_id),
         quest_log=game_state_manager.get_quest_log(session_id),
         map_display=game_state_manager.get_map_display(session_id),
-        character_portrait=f"/portraits/{npc_id}.png"
+        character_portrait=f"/portraits/{npc_id}.png" if npc_id else None,
+        game_mode=game_state_manager.get_game_mode(session_id)
     )
 
 
@@ -172,7 +215,8 @@ async def handle_command(command_input: CommandInput):
         gold=game_state_manager.get_gold(session_id),
         quest_log=game_state_manager.get_quest_log(session_id),
         map_display=game_state_manager.get_map_display(session_id),
-        npcs_in_location=npcs_in_location
+        npcs_in_location=npcs_in_location,
+        game_mode=game_state_manager.get_game_mode(session_id)
     )
 
 
@@ -196,13 +240,19 @@ async def start_game(start_input: StartGameInput):
                                           player_name=start_input.player_name)
 
     initial_description_parts = game_state_manager.get_current_location_description(session_id)
-    initial_dialogue = initial_description_parts["location_description"]
-    if initial_description_parts.get("current_feature_description"):
-        initial_dialogue += f"\n{initial_description_parts['current_feature_description']}"
-    if initial_description_parts.get("adjacent_features_description"):
-        initial_dialogue += f"\n{initial_description_parts['adjacent_features_description']}"
-    if initial_description_parts.get("npcs_description"):
-        initial_dialogue += f"\n{initial_description_parts['npcs_description']}"
+    
+    if "error" in initial_description_parts:
+        logger.error(f"Error getting location description: {initial_description_parts['error']}")
+        # Fallback or raise exception
+        initial_dialogue = f"Error: {initial_description_parts['error']}"
+    else:
+        initial_dialogue = initial_description_parts.get("location_description", "You are in a void.")
+        if initial_description_parts.get("current_feature_description"):
+            initial_dialogue += f"\n{initial_description_parts['current_feature_description']}"
+        if initial_description_parts.get("adjacent_features_description"):
+            initial_dialogue += f"\n{initial_description_parts['adjacent_features_description']}"
+        if initial_description_parts.get("npcs_description"):
+            initial_dialogue += f"\n{initial_description_parts['npcs_description']}"
     
     npcs_in_location = game_state_manager.get_npcs_in_location(session_id)
 
