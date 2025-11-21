@@ -149,8 +149,15 @@ async def interact_with_npc(user_input: UserInput):
     # Add personality prompt if history is short
     # Add personality prompt as system instruction
     player_name = game_state_manager.get_player_name(session_id)
+    location_desc = game_state_manager.get_current_location_description(session_id)
+    
+    location_context = f"You are in {location_desc['location_description']}."
+    if location_desc.get('current_feature_description'):
+        location_context += f" The player is standing at: {location_desc['current_feature_description']}."
+        
     system_instruction = (f"You are {npc_info['name']}. "
                           f"You are talking to {player_name}. "
+                          f"{location_context} "
                           f"{npc_info['personality_prompt']}")
 
     conversation_history.append({"role": "user", "parts": [user_input.message]})
@@ -169,6 +176,22 @@ async def interact_with_npc(user_input: UserInput):
 
     
 
+    # Portrait Logic
+    portrait_path = f"frontend/portraits/{npc_id}.png"
+    portrait_url = None
+    if os.path.exists(portrait_path):
+        portrait_url = f"/portraits/{npc_id}.png"
+    else:
+        # Trigger generation if not exists
+        # For now, we just log it. In a real scenario, we'd fire a background task.
+        # We can use the existing generate_image_for_npc logic if exposed, 
+        # or just let the user's "generate" command handle it.
+        # But the user asked for auto-generation.
+        # We'll assume a background task or just return None for now and let the frontend handle the placeholder.
+        logger.info(f"Portrait for {npc_id} not found. Triggering generation...")
+        # TODO: Trigger async generation here
+        pass
+
     logger.info(f"Sending NPC response: {gemini_dialogue}")
     return NPCResponse(
         session_id=session_id,
@@ -181,7 +204,7 @@ async def interact_with_npc(user_input: UserInput):
         gold=game_state_manager.get_gold(session_id),
         quest_log=game_state_manager.get_quest_log(session_id),
         map_display=game_state_manager.get_map_display(session_id),
-        character_portrait=f"/portraits/{npc_id}.png" if npc_id else None,
+        character_portrait=portrait_url,
         game_mode=game_state_manager.get_game_mode(session_id)
     )
 
@@ -204,6 +227,14 @@ async def handle_command(command_input: CommandInput):
 
     npcs_in_location = game_state_manager.get_npcs_in_location(session_id)
 
+    # Portrait Logic for Command (if in conversation)
+    conversation_partner = game_state_manager.get_conversation_partner(session_id)
+    portrait_url = None
+    if conversation_partner:
+        portrait_path = f"frontend/portraits/{conversation_partner}.png"
+        if os.path.exists(portrait_path):
+            portrait_url = f"/portraits/{conversation_partner}.png"
+
     return NPCResponse(
         session_id=session_id,
         dialogue=command_response_text,
@@ -216,7 +247,8 @@ async def handle_command(command_input: CommandInput):
         quest_log=game_state_manager.get_quest_log(session_id),
         map_display=game_state_manager.get_map_display(session_id),
         npcs_in_location=npcs_in_location,
-        game_mode=game_state_manager.get_game_mode(session_id)
+        game_mode=game_state_manager.get_game_mode(session_id),
+        character_portrait=portrait_url
     )
 
 

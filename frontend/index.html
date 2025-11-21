@@ -21,98 +21,110 @@
 
         <!-- EXPLORATION MODE VIEW -->
         <div id="exploration-view" class="game-view">
-            <!-- Left: Chat Log -->
-            <div class="panel left-panel">
-                <div class="panel-header">Log</div>
-                <div id="chat-container" class="log-container">
-                    <div class="message system">Welcome to ChatRPG. Initializing...</div>
-                </div>
-                <div class="input-area">
-                    <input type="text" id="exploration-input" placeholder="Type a command..." autocomplete="off">
-                    <button class="btn" onclick="sendExplorationCommand()">Send</button>
-                </div>
-            </div>
-
-            <!-- Center: Map -->
-            <div class="panel center-panel">
-                <div id="map-container">
-                    <div id="game-map">
-                        <!-- Map tiles generated here -->
-                    </div>
-                </div>
-                <div class="d-pad-container">
-                    <div class="d-pad">
-                        <button></button>
-                        <button onclick="sendCommand('go north')">N</button>
-                        <button></button>
-                        <button onclick="sendCommand('go west')">W</button>
-                        <button onclick="sendCommand('look')">👁️</button>
-                        <button onclick="sendCommand('go east')">E</button>
-                        <button></button>
-                        <button onclick="sendCommand('go south')">S</button>
-                        <button></button>
+            <!-- Top: Map (Full Width) -->
+            <div class="top-section">
+                <div class="panel center-panel">
+                    <div id="map-container">
+                        <div id="game-map">
+                            <!-- Map tiles generated here -->
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Right: Local Brief & Stats -->
-            <div class="panel right-panel">
-                <div class="stat-card">
-                    <h3>Nearby</h3>
-                    <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
-                        <div style="color: #888; font-style: italic;">No one is here.</div>
+            <!-- Bottom: Log | Controls -->
+            <div class="bottom-section">
+                <!-- Left: Log -->
+                <div class="panel left-bottom-panel">
+                    <div class="panel-header">Log</div>
+                    <div id="chat-container" class="log-container">
+                        <div class="message system">Welcome to ChatRPG. Initializing...</div>
+                    </div>
+                    <div class="input-area">
+                        <input type="text" id="exploration-input" placeholder="Type a command..." autocomplete="off">
+                        <button class="btn" onclick="sendExplorationCommand()">Send</button>
                     </div>
                 </div>
 
-                <div class="stat-card">
-                    <h3>Character</h3>
-                    <div class="stat-row"><span>Name</span> <span id="player-name">...</span></div>
-                    <div class="stat-row"><span>Health</span> <span id="player-health">100</span></div>
-                    <div class="stat-row"><span>Gold</span> <span id="player-gold">0</span></div>
-                </div>
+                <!-- Right: Controls (Nav/Stats) -->
+                <div class="panel right-bottom-panel">
+                    <div class="stat-card">
+                        <h3>Navigation</h3>
+                        <div class="d-pad">
+                            <button></button>
+                            <button onclick="sendCommand('go north')">N</button>
+                            <button></button>
+                            <button onclick="sendCommand('go west')">W</button>
+                            <button onclick="sendCommand('look')">👁️</button>
+                            <button onclick="sendCommand('go east')">E</button>
+                            <button></button>
+                            <button onclick="sendCommand('go south')">S</button>
+                            <button></button>
+                        </div>
+                    </div>
 
-                <div class="stat-card">
-                    <h3>Actions</h3>
-                    <button class="btn" style="width: 100%; margin-bottom: 5px;"
-                        onclick="sendCommand('inventory')">Inventory</button>
-                    <button class="btn" style="width: 100%; background-color: #333; color: #fff;"
-                        onclick="sendCommand('enter')">Enter/Exit</button>
+                    <div class="stat-card">
+                        <h3>Nearby</h3>
+                        <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
+                            <div style="color: #888; font-style: italic;">No one is here.</div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h3>Actions</h3>
+                        <button class="btn" style="width: 100%; margin-bottom: 5px;"
+                            onclick="sendCommand('inventory')">Inventory</button>
+                        <button class="btn" style="width: 100%; background-color: #333; color: #fff;"
+                            onclick="sendCommand('enter')">Enter/Exit</button>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- INTERACTION MODE VIEW -->
         <div id="interaction-view" class="game-view hidden">
-            <!-- Left: Dialogue History -->
-            <div class="panel left-panel">
-                <div class="panel-header">Conversation</div>
-                <div id="dialogue-container" class="log-container">
-                    <!-- Dialogue history goes here -->
+            <!-- Top: Portrait (Full Width) -->
+            <div class="top-section">
+                <div class="panel center-panel interaction-center">
+                    <div class="portrait-wrapper">
+                        <img id="character-portrait" src="" alt="Portrait">
+                        <div id="portrait-placeholder" class="portrait-placeholder">?</div>
+                    </div>
+                    <div id="current-dialogue-bubble" class="dialogue-bubble" style="display:none;">
+                        <!-- Latest spoken text -->
+                    </div>
                 </div>
             </div>
 
-            <!-- Center: Portrait & Current Dialogue -->
-            <div class="panel center-panel interaction-center">
-                <div class="portrait-wrapper">
-                    <img id="character-portrait" src="" alt="Portrait">
+            <!-- Bottom: History | Controls -->
+            <div class="bottom-section">
+                <!-- Left: History -->
+                <div class="panel left-bottom-panel">
+                    <div class="panel-header">Conversation History</div>
+                    <div id="dialogue-container" class="log-container">
+                        <!-- Dialogue history goes here -->
+                    </div>
+                    <div class="input-area">
+                        <input type="text" id="interaction-input" placeholder="Say something..." autocomplete="off">
+                        <button class="btn" onclick="sendInteractionCommand()">Say</button>
+                    </div>
                 </div>
-                <div id="current-dialogue-bubble" class="dialogue-bubble">
-                    <!-- Latest spoken text -->
-                </div>
-            </div>
 
-            <!-- Right: Interaction Actions -->
-            <div class="panel right-panel">
-                <div class="stat-card">
-                    <h3>Interaction</h3>
-                    <button class="btn btn-danger" style="width: 100%; margin-bottom: 10px;"
-                        onclick="sendCommand('leave')">Leave Conversation</button>
-                    <button class="btn" style="width: 100%; margin-bottom: 5px;"
-                        onclick="sendCommand('trade')">Trade</button>
-                </div>
-                <div class="input-area">
-                    <input type="text" id="interaction-input" placeholder="Say something..." autocomplete="off">
-                    <button class="btn" onclick="sendInteractionCommand()">Say</button>
+                <!-- Right: Interaction Controls -->
+                <div class="panel right-bottom-panel">
+                    <div class="stat-card">
+                        <h3>Interaction</h3>
+                        <button class="btn btn-danger" style="width: 100%; margin-bottom: 10px;"
+                            onclick="sendCommand('leave')">Leave Conversation</button>
+                        <button class="btn" style="width: 100%; margin-bottom: 5px;"
+                            onclick="sendCommand('trade')">Trade</button>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Character</h3>
+                        <div class="stat-row"><span>Name</span> <span id="player-name-int">...</span></div>
+                        <div class="stat-row"><span>Health</span> <span id="player-health-int">100</span></div>
+                        <div class="stat-row"><span>Gold</span> <span id="player-gold-int">0</span></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -186,17 +198,31 @@
             currentGameMode = data.game_mode || "EXPLORATION";
             updateViewVisibility();
 
-            // Update Common Stats
-            document.getElementById('player-name').textContent = data.player_name;
-            document.getElementById('player-health').textContent = data.health;
-            document.getElementById('player-gold').textContent = data.gold;
+            // Update Common Stats (Exploration)
+            if (document.getElementById('player-name')) document.getElementById('player-name').textContent = data.player_name;
+            if (document.getElementById('player-health')) document.getElementById('player-health').textContent = data.health;
+            if (document.getElementById('player-gold')) document.getElementById('player-gold').textContent = data.gold;
+
+            // Update Common Stats (Interaction)
+            if (document.getElementById('player-name-int')) document.getElementById('player-name-int').textContent = data.player_name;
+            if (document.getElementById('player-health-int')) document.getElementById('player-health-int').textContent = data.health;
+            if (document.getElementById('player-gold-int')) document.getElementById('player-gold-int').textContent = data.gold;
+
             document.getElementById('world-name').textContent = data.world_name;
 
             // Mode Specific Updates
             if (currentGameMode === "EXPLORATION") {
                 updateExplorationState(data);
             } else {
+                // Check if we just switched to interaction and have no dialogue
+                // If so, trigger a greeting
+                const wasExploration = document.getElementById('interaction-view').classList.contains('hidden');
                 updateInteractionState(data);
+
+                if (wasExploration && !data.dialogue) {
+                    // Trigger greeting
+                    sendInteractionCommand("Hello"); // Or send a special 'init' flag if backend supported it
+                }
             }
 
             document.getElementById('status').className = 'status-indicator status-ok';
@@ -225,11 +251,27 @@
                     card.className = 'stat-card';
                     card.style.cursor = 'pointer';
                     card.style.transition = 'background 0.2s';
+
+                    let locationText = "";
+                    let canTalk = true;
+
+                    if (npc.distance === 0) {
+                        locationText = "<span style='color:#4caf50'>Here</span>";
+                    } else {
+                        locationText = `<span style='color:#888'>${npc.distance} steps away</span>`;
+                        // Optional: Disable talk if too far?
+                        // canTalk = false; 
+                    }
+
                     card.innerHTML = `
-                        <h3 style="margin: 0; color: var(--accent-color);">${npc.name}</h3>
-                        <p style="font-size: 0.9rem; color: #ccc;">${npc.short_description}</p>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h3 style="margin: 0; color: var(--accent-color); border:none;">${npc.name}</h3>
+                            <small>${locationText}</small>
+                        </div>
+                        <p style="font-size: 0.85rem; color: #ccc; margin-top:5px;">${npc.short_description}</p>
                         <div style="margin-top: 10px;">
-                            <button class="btn" style="font-size: 0.8rem; padding: 5px 10px;" onclick="sendCommand('talk to ${npc.name}')">Talk</button>
+                            <button class="btn" style="font-size: 0.8rem; padding: 5px 10px; width:100%;" 
+                                onclick="sendCommand('talk to ${npc.name}')">Talk</button>
                         </div>
                     `;
                     card.onmouseover = () => card.style.background = 'rgba(255, 255, 255, 0.1)';
@@ -252,20 +294,32 @@
         function updateInteractionState(data) {
             // Portrait
             const portraitImg = document.getElementById('character-portrait');
+            const placeholder = document.getElementById('portrait-placeholder');
+
             if (data.character_portrait && !data.character_portrait.endsWith('None.png')) {
                 portraitImg.src = `http://localhost:8000${data.character_portrait}`;
                 portraitImg.style.display = 'block';
+                placeholder.style.display = 'none';
             } else {
                 portraitImg.style.display = 'none';
+                placeholder.style.display = 'flex';
             }
 
             // Current Dialogue Bubble
             const bubble = document.getElementById('current-dialogue-bubble');
             if (data.dialogue) {
-                bubble.textContent = data.dialogue;
+                bubble.innerHTML = formatDialogue(data.dialogue);
+                bubble.style.display = 'block';
                 // Also add to history
                 addMessage(data.dialogue, 'model', dialogueContainer);
+            } else {
+                bubble.style.display = 'none';
             }
+        }
+
+        function formatDialogue(text) {
+            // Highlight text within quotes
+            return text.replace(/"([^"]*)"/g, '<span class="dialogue-quote">"$1"</span>');
         }
 
         function renderMap(mapData) {
