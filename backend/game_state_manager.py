@@ -450,12 +450,42 @@ class GameStateManager:
         character = game_world.get_character(npc_id)
         return character.dict() if character else None
 
+    def get_npc_state(self, session_id: str, npc_name: str) -> Dict[str, Any]:
+        """Retrieves the state of a specific NPC."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return {}
+        npc_states = data.get("npc_states", {})
+        return npc_states.get(npc_name, {})
+
+    def update_npc_state(self, session_id: str, npc_name: str, updates: Dict[str, Any]):
+        """Updates the state of a specific NPC."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return
+        
+        npc_states = data.get("npc_states", {})
+        if npc_name not in npc_states:
+            npc_states[npc_name] = {}
+            
+        npc_states[npc_name].update(updates)
+        self._update_session_field(session_id, "npc_states", npc_states)
+
+    def archive_conversation(self, session_id: str):
+        """Archives the current conversation history and clears it."""
+        # For now, we just clear it, assuming memory has been extracted.
+        # In a full implementation, we might append it to a 'long_term_history' field.
+        self._update_session_field(session_id, "conversation_history", [])
+
     def get_npcs_in_location(self, session_id: str) -> List[Dict]:
         session = self._get_session_data(session_id)
         if not session:
             return []
 
         current_location_name = session.get("current_location_name")
+        player_x = session.get("player_x", 0)
+        player_y = session.get("player_y", 0)
+        
         npcs_here = []
         logger.info(f"Checking for NPCs in location: {current_location_name}")
 
@@ -463,7 +493,17 @@ class GameStateManager:
             if npc_state["location"] == current_location_name:
                 npc_info = self.get_npc_info(npc_id)
                 if npc_info:
-                    npcs_here.append({"id": npc_id, "name": npc_info["name"], "short_description": npc_info["short_description"]})
+                    dist = abs(npc_state['x'] - player_x) + abs(npc_state['y'] - player_y)
+                    # Only include NPCs that are in the same tile or adjacent (distance <= 1)
+                    if dist <= 1:
+                        npcs_here.append({
+                            "id": npc_id, 
+                            "name": npc_info["name"], 
+                            "short_description": npc_info["short_description"],
+                            "x": npc_state['x'],
+                            "y": npc_state['y'],
+                            "distance": dist
+                        })
         
         return npcs_here
 

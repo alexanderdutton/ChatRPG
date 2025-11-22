@@ -5,7 +5,7 @@ from logging.handlers import TimedRotatingFileHandler
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import List, Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world
-from .gemini_service import get_gemini_response, generate_game_data
+from .gemini_service import get_gemini_response, generate_game_data, generate_npc_memory_update
 from .gemini_image_generator import generate_and_save_image
 
 # Add the project root to the sys.path
@@ -116,8 +116,10 @@ class NPCResponse(BaseModel):
     health: int
     gold: int
     quest_log: List[str]
-    map_display: Optional[Dict] = None
+    map_display: Dict[str, Any]
     character_portrait: Optional[str] = None
+    game_mode: str
+    conversation_partner_name: Optional[str] = None
     npcs_in_location: Optional[List[Dict]] = None
     game_mode: str = "EXPLORATION"
 
@@ -146,7 +148,58 @@ async def interact_with_npc(user_input: UserInput):
     conversation_history = game_state_manager.get_conversation_history(session_id)
     logger.info(f"Conversation history before adding user message: {conversation_history}")
 
-    # Add personality prompt if history is short
+    # Retrieve NPC state for memory and greetings
+    npc_state = game_state_manager.get_npc_state(session_id, npc_id)
+    npc_memory = npc_state.get("memory", [])
+    npc_greetings = npc_state.get("greetings", [])
+
+    # Check for initial greeting (empty history)
+    if not conversation_history:
+        logger.info("Initial interaction. Using preloaded greeting.")
+        
+        # Use dynamic greetings if available, otherwise fallback to NPC info or defaults
+        greetings = npc_greetings if npc_greetings else npc_info.get("greetings", [
+            "Hello there.",
+            "Greetings, traveler.",
+            "What brings you here?",
+            "Can I help you?",
+            "Well met."
+        ])
+        
+        import random
+        greeting = random.choice(greetings)
+        
+        # Add to history
+        conversation_history.append({"role": "model", "parts": [greeting]})
+        game_state_manager.update_conversation_history(session_id, conversation_history)
+        
+        # Portrait Logic
+        portrait_path = f"frontend/portraits/{npc_id}.png"
+        portrait_url = None
+        if os.path.exists(portrait_path):
+            portrait_url = f"/portraits/{npc_id}.png"
+        else:
+            logger.info(f"Portrait for {npc_id} not found. Triggering generation...")
+            # Async generation trigger
+            import asyncio
+            asyncio.create_task(get_npc_portrait(npc_id))
+
+        return NPCResponse(
+            session_id=session_id,
+            dialogue=greeting,
+            player_name=game_state_manager.get_player_name(session_id),
+            current_location=game_state_manager.get_current_location_name(session_id),
+            world_name=game_state_manager.get_world_name(),
+            inventory=game_state_manager.get_inventory(session_id),
+            health=game_state_manager.get_health(session_id),
+            gold=game_state_manager.get_gold(session_id),
+            quest_log=game_state_manager.get_quest_log(session_id),
+            map_display=game_state_manager.get_map_display(session_id),
+            character_portrait=portrait_url,
+            game_mode=game_state_manager.get_game_mode(session_id),
+            conversation_partner_name=npc_info.get("name", "Unknown")
+        )
+
     # Add personality prompt as system instruction
     player_name = game_state_manager.get_player_name(session_id)
     location_desc = game_state_manager.get_current_location_description(session_id)
@@ -155,10 +208,16 @@ async def interact_with_npc(user_input: UserInput):
     if location_desc.get('current_feature_description'):
         location_context += f" The player is standing at: {location_desc['current_feature_description']}."
         
+    # Inject Memory
+    memory_context = ""
+    if npc_memory:
+        memory_context = f"Memories of {player_name}: {json.dumps(npc_memory)}"
+
     system_instruction = (f"You are {npc_info['name']}. "
                           f"You are talking to {player_name}. "
                           f"{location_context} "
-                          f"{npc_info['personality_prompt']}")
+                          f"{npc_info['personality_prompt']} "
+                          f"{memory_context}")
 
     conversation_history.append({"role": "user", "parts": [user_input.message]})
     logger.info(f"Conversation history after adding user message: {conversation_history}")
@@ -205,7 +264,8 @@ async def interact_with_npc(user_input: UserInput):
         quest_log=game_state_manager.get_quest_log(session_id),
         map_display=game_state_manager.get_map_display(session_id),
         character_portrait=portrait_url,
-        game_mode=game_state_manager.get_game_mode(session_id)
+        game_mode=game_state_manager.get_game_mode(session_id),
+        conversation_partner_name=npc_info.get("name", "Unknown") if npc_info else None
     )
 
 
@@ -224,6 +284,116 @@ async def handle_command(command_input: CommandInput):
 
     command_response_text = await game_state_manager.process_command(session_id,
                                                                 command_input.command)
+
+    # Check if we just entered interaction mode to trigger an immediate greeting
+    if command_input.command.lower().startswith("talk to "):
+        npc_id = game_state_manager.get_conversation_partner(session_id)
+        if npc_id:
+            npc_info = game_state_manager.get_npc_info(npc_id)
+            npc_state = game_state_manager.get_npc_state(session_id, npc_id)
+            npc_greetings = npc_state.get("greetings", [])
+            
+            # Use dynamic greetings if available, otherwise fallback
+            greetings = npc_greetings if npc_greetings else npc_info.get("greetings", [
+                "Hello there.",
+                "Greetings, traveler.",
+                "What brings you here?",
+                "Can I help you?",
+                "Well met."
+            ])
+            
+            import random
+            greeting = random.choice(greetings)
+            
+            # Add to history so it's consistent
+            conversation_history = game_state_manager.get_conversation_history(session_id)
+            conversation_history.append({"role": "model", "parts": [greeting]})
+            game_state_manager.update_conversation_history(session_id, conversation_history)
+            
+            # Override response text with the greeting
+            command_response_text = greeting
+
+            # Portrait Logic: Trigger generation if missing
+            portrait_path = f"frontend/portraits/{npc_id}.png"
+            if not os.path.exists(portrait_path):
+                logger.info(f"Portrait for {npc_id} not found. Triggering generation...")
+                import asyncio
+                asyncio.create_task(get_npc_portrait(npc_id))
+
+    # Check if command was "leave" or "exit" to trigger memory update
+    if command_input.command.lower() in ["leave", "exit", "bye", "goodbye"]:
+        npc_id = game_state_manager.get_conversation_partner(session_id)
+        # If we were in a conversation (npc_id might be None if already left, but let's check history)
+        # Actually, process_command sets conversation_partner to None on leave.
+        # We need to capture it BEFORE process_command or check if we just left.
+        # But process_command handles the state change.
+        
+        # Alternative: Check if we *were* in interaction mode and now are not?
+        # Or better: Just check if there's a lingering conversation history to process.
+        history = game_state_manager.get_conversation_history(session_id)
+        if history:
+             # We have a history to process!
+             # We need to know WHO we were talking to. 
+             # Since process_command cleared the partner, we might need to store it temporarily or retrieve it differently.
+             # However, `process_command` logic for "leave" is:
+             # 1. Check if in interaction
+             # 2. Set mode to EXPLORATION
+             # 3. Set partner to None
+             
+             # We can't easily get the partner ID *after* process_command returns if it cleared it.
+             # Let's modify this flow slightly.
+             pass # Logic moved to inside process_command or handled here by peeking before call?
+             # Peeking before call is safer.
+    
+    # RE-IMPLEMENTING COMMAND PROCESSING TO CAPTURE CONTEXT FOR MEMORY UPDATE
+    # We need to do this BEFORE process_command clears the state.
+    
+    pre_command_partner = game_state_manager.get_conversation_partner(session_id)
+    pre_command_history = game_state_manager.get_conversation_history(session_id)
+    
+    # ... (process_command called above) ...
+    
+    # If we successfully left a conversation
+    if command_input.command.lower() in ["leave", "exit", "bye", "goodbye"] and pre_command_partner and pre_command_history:
+        logger.info(f"Ending conversation with {pre_command_partner}. Triggering memory update.")
+        
+        # Async Memory Update
+        npc_info = game_state_manager.get_npc_info(pre_command_partner)
+        npc_state = game_state_manager.get_npc_state(session_id, pre_command_partner)
+        current_memory = npc_state.get("memory", [])
+        current_greetings = npc_state.get("greetings", [])
+        player_name = game_state_manager.get_player_name(session_id)
+        
+        # Define async task
+        async def update_memory_task():
+            updates = await generate_npc_memory_update(
+                pre_command_history,
+                current_memory,
+                current_greetings,
+                npc_info['name'],
+                player_name
+            )
+            
+            if updates:
+                new_memory = updates.get("memory_update", [])
+                new_greetings = updates.get("new_greetings", [])
+                
+                # Update State
+                if new_memory:
+                    # Append new memories
+                    updated_memory = current_memory + new_memory
+                    game_state_manager.update_npc_state(session_id, pre_command_partner, {"memory": updated_memory})
+                    logger.info(f"Updated memory for {pre_command_partner}: {new_memory}")
+                
+                if new_greetings:
+                    game_state_manager.update_npc_state(session_id, pre_command_partner, {"greetings": new_greetings})
+                    logger.info(f"Updated greetings for {pre_command_partner}: {new_greetings}")
+
+            # Archive/Clear History
+            game_state_manager.archive_conversation(session_id)
+
+        import asyncio
+        asyncio.create_task(update_memory_task())
 
     npcs_in_location = game_state_manager.get_npcs_in_location(session_id)
 

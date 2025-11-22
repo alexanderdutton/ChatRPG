@@ -169,3 +169,52 @@ async def generate_quest(context: str) -> str:
     except Exception as e:
         logger.error(f"Error generating quest: {e}")
         return "You hear rumors of trouble nearby, but nothing specific."
+
+async def generate_npc_memory_update(conversation_history: List[Dict], 
+                                     current_memory: List[str], 
+                                     current_greetings: List[str],
+                                     npc_name: str,
+                                     player_name: str) -> Dict[str, Any]:
+    """Generates a memory update and new greetings for an NPC based on a conversation."""
+    try:
+        # Format conversation for the prompt
+        formatted_convo = ""
+        for entry in conversation_history:
+            role = "Player" if entry["role"] == "user" else npc_name
+            text = " ".join(entry["parts"])
+            formatted_convo += f"{role}: {text}\n"
+
+        prompt = f"""
+        Analyze the following conversation between {npc_name} and {player_name}.
+        
+        Current Memory of {npc_name}: {json.dumps(current_memory)}
+        Current Greetings: {json.dumps(current_greetings)}
+        
+        Conversation:
+        {formatted_convo}
+        
+        Task:
+        1. Identify any significant new information {npc_name} learned about {player_name} or the world.
+        2. Summarize this into a concise memory string (or multiple strings).
+        3. Evaluate the current greetings. Create 2-3 NEW, short greetings that reflect the current relationship and recent events.
+        
+        Output JSON format:
+        {{
+            "memory_update": ["memory string 1", "memory string 2"],
+            "new_greetings": ["greeting 1", "greeting 2", "greeting 3"]
+        }}
+        
+        If nothing important happened, return empty list for memory_update.
+        ALWAYS return new_greetings to keep them fresh.
+        """
+        
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=prompt
+        )
+        
+        _, metadata = extract_json_metadata(response.text)
+        return metadata
+    except Exception as e:
+        logger.error(f"Error generating NPC memory update: {e}")
+        return {}

@@ -19,37 +19,83 @@
             </div>
         </header>
 
-        <!-- EXPLORATION MODE VIEW -->
-        <div id="exploration-view" class="game-view">
-            <!-- Top: Map (Full Width) -->
-            <div class="top-section">
-                <div class="panel center-panel">
+        <!-- MAIN GRID LAYOUT -->
+        <div class="main-grid">
+
+            <!-- TOP LEFT: VIEW (Map or Portrait) -->
+            <div class="grid-cell top-left" id="view-panel">
+                <!-- Exploration View: Map -->
+                <div id="exploration-view-content" class="view-content">
                     <div id="map-container">
                         <div id="game-map">
                             <!-- Map tiles generated here -->
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Bottom: Log | Controls -->
-            <div class="bottom-section">
-                <!-- Left: Log -->
-                <div class="panel left-bottom-panel">
-                    <div class="panel-header">Log</div>
-                    <div id="chat-container" class="log-container">
-                        <div class="message system">Welcome to ChatRPG. Initializing...</div>
-                    </div>
-                    <div class="input-area">
-                        <input type="text" id="exploration-input" placeholder="Type a command..." autocomplete="off">
-                        <button class="btn" onclick="sendExplorationCommand()">Send</button>
+                <!-- Interaction View: Portrait -->
+                <div id="interaction-view-content" class="view-content hidden">
+                    <div class="portrait-wrapper">
+                        <img id="character-portrait" src="" alt="Portrait">
+                        <div id="portrait-placeholder" class="portrait-placeholder">?</div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Right: Controls (Nav/Stats) -->
-                <div class="panel right-bottom-panel">
-                    <div class="stat-card">
-                        <h3>Navigation</h3>
+            <!-- TOP RIGHT: CONTEXT (Situation) -->
+            <div class="grid-cell top-right" id="context-panel">
+                <div class="panel-header">Situation</div>
+                <div class="scrollable-content">
+                    <!-- Exploration Context -->
+                    <div id="exploration-context">
+                        <div class="stat-card">
+                            <h3>When</h3>
+                            <div class="stat-row"><span>Time</span> <span>Day 1, Morning</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Where</h3>
+                            <div class="stat-row"><span id="context-location">...</span></div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Who & What</h3>
+                            <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
+                                <div style="color: #888; font-style: italic;">No one nearby.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Interaction Context -->
+                    <div id="interaction-context" class="hidden">
+                        <div class="stat-card">
+                            <h3>Interaction</h3>
+                            <div id="npc-details">
+                                <h3 id="npc-name-display" style="color: var(--accent-color); margin:0;">Unknown</h3>
+                                <p id="npc-desc-display" style="font-size: 0.9rem; color: #ccc; margin-top: 5px;">...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BOTTOM LEFT: LOG (Chat/History) -->
+            <div class="grid-cell bottom-left" id="log-panel">
+                <div class="panel-header">Log</div>
+                <div id="chat-container" class="log-container">
+                    <div class="message system">Welcome to ChatRPG. Initializing...</div>
+                </div>
+                <div class="input-area">
+                    <input type="text" id="main-input" placeholder="Type a command..." autocomplete="off">
+                    <button class="btn" onclick="sendMainCommand()">Send</button>
+                </div>
+            </div>
+
+            <!-- BOTTOM RIGHT: CONTROLS (Split: Nav | Actions) -->
+            <div class="grid-cell bottom-right" id="controls-panel">
+                <div class="panel-header">Controls</div>
+                <div class="controls-content split-controls">
+                    <!-- Left: Navigation (Hidden in Interaction) -->
+                    <div id="nav-controls" class="control-half">
                         <div class="d-pad">
                             <button></button>
                             <button onclick="sendCommand('go north')">N</button>
@@ -63,70 +109,26 @@
                         </div>
                     </div>
 
-                    <div class="stat-card">
-                        <h3>Nearby</h3>
-                        <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
-                            <div style="color: #888; font-style: italic;">No one is here.</div>
+                    <!-- Right: Actions -->
+                    <div id="action-controls" class="control-half">
+                        <!-- Exploration Actions -->
+                        <div id="expl-actions">
+                            <button class="btn" style="width: 100%; margin-bottom: 5px;"
+                                onclick="sendCommand('inventory')">Inventory</button>
+                            <button class="btn" style="width: 100%; background-color: #333; color: #fff;"
+                                onclick="sendCommand('enter')">Enter</button>
+                        </div>
+                        <!-- Interaction Actions -->
+                        <div id="int-actions" class="hidden">
+                            <button class="btn btn-danger" style="width: 100%; margin-bottom: 10px;"
+                                onclick="sendCommand('leave')">Leave</button>
+                            <button class="btn" style="width: 100%; margin-bottom: 5px;"
+                                onclick="sendCommand('trade')">Trade</button>
                         </div>
                     </div>
-
-                    <div class="stat-card">
-                        <h3>Actions</h3>
-                        <button class="btn" style="width: 100%; margin-bottom: 5px;"
-                            onclick="sendCommand('inventory')">Inventory</button>
-                        <button class="btn" style="width: 100%; background-color: #333; color: #fff;"
-                            onclick="sendCommand('enter')">Enter/Exit</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- INTERACTION MODE VIEW -->
-        <div id="interaction-view" class="game-view hidden">
-            <!-- Top: Portrait (Full Width) -->
-            <div class="top-section">
-                <div class="panel center-panel interaction-center">
-                    <div class="portrait-wrapper">
-                        <img id="character-portrait" src="" alt="Portrait">
-                        <div id="portrait-placeholder" class="portrait-placeholder">?</div>
-                    </div>
-                    <div id="current-dialogue-bubble" class="dialogue-bubble" style="display:none;">
-                        <!-- Latest spoken text -->
-                    </div>
                 </div>
             </div>
 
-            <!-- Bottom: History | Controls -->
-            <div class="bottom-section">
-                <!-- Left: History -->
-                <div class="panel left-bottom-panel">
-                    <div class="panel-header">Conversation History</div>
-                    <div id="dialogue-container" class="log-container">
-                        <!-- Dialogue history goes here -->
-                    </div>
-                    <div class="input-area">
-                        <input type="text" id="interaction-input" placeholder="Say something..." autocomplete="off">
-                        <button class="btn" onclick="sendInteractionCommand()">Say</button>
-                    </div>
-                </div>
-
-                <!-- Right: Interaction Controls -->
-                <div class="panel right-bottom-panel">
-                    <div class="stat-card">
-                        <h3>Interaction</h3>
-                        <button class="btn btn-danger" style="width: 100%; margin-bottom: 10px;"
-                            onclick="sendCommand('leave')">Leave Conversation</button>
-                        <button class="btn" style="width: 100%; margin-bottom: 5px;"
-                            onclick="sendCommand('trade')">Trade</button>
-                    </div>
-                    <div class="stat-card">
-                        <h3>Character</h3>
-                        <div class="stat-row"><span>Name</span> <span id="player-name-int">...</span></div>
-                        <div class="stat-row"><span>Health</span> <span id="player-health-int">100</span></div>
-                        <div class="stat-row"><span>Gold</span> <span id="player-gold-int">0</span></div>
-                    </div>
-                </div>
-            </div>
         </div>
 
     </div>
@@ -137,14 +139,8 @@
         let currentGameMode = "EXPLORATION";
 
         // --- UI References ---
-        const explorationView = document.getElementById('exploration-view');
-        const interactionView = document.getElementById('interaction-view');
-
         const chatContainer = document.getElementById('chat-container');
-        const dialogueContainer = document.getElementById('dialogue-container');
-
-        const explorationInput = document.getElementById('exploration-input');
-        const interactionInput = document.getElementById('interaction-input');
+        const mainInput = document.getElementById('main-input');
 
         // --- Initialization ---
         window.onload = async () => {
@@ -159,11 +155,8 @@
             }
 
             // Input listeners
-            explorationInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendExplorationCommand();
-            });
-            interactionInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendInteractionCommand();
+            mainInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendMainCommand();
             });
         };
 
@@ -195,46 +188,105 @@
             }
 
             // Update Game Mode
+            const prevMode = currentGameMode;
             currentGameMode = data.game_mode || "EXPLORATION";
-            updateViewVisibility();
 
-            // Update Common Stats (Exploration)
-            if (document.getElementById('player-name')) document.getElementById('player-name').textContent = data.player_name;
-            if (document.getElementById('player-health')) document.getElementById('player-health').textContent = data.health;
-            if (document.getElementById('player-gold')) document.getElementById('player-gold').textContent = data.gold;
+            // Update View Visibility
+            updateViewVisibility(prevMode);
 
-            // Update Common Stats (Interaction)
-            if (document.getElementById('player-name-int')) document.getElementById('player-name-int').textContent = data.player_name;
-            if (document.getElementById('player-health-int')) document.getElementById('player-health-int').textContent = data.health;
-            if (document.getElementById('player-gold-int')) document.getElementById('player-gold-int').textContent = data.gold;
+            // Update Common Stats (Removed from UI but data still available if needed)
+            // const nameEls = ['player-name', 'player-name-int'];
+            // const healthEls = ['player-health', 'player-health-int'];
+            // const goldEls = ['player-gold', 'player-gold-int'];
+
+            // nameEls.forEach(id => { if(document.getElementById(id)) document.getElementById(id).textContent = data.player_name; });
+            // healthEls.forEach(id => { if(document.getElementById(id)) document.getElementById(id).textContent = data.health; });
+            // goldEls.forEach(id => { if(document.getElementById(id)) document.getElementById(id).textContent = data.gold; });
 
             document.getElementById('world-name').textContent = data.world_name;
+            if (document.getElementById('context-location')) document.getElementById('context-location').textContent = data.current_location;
 
             // Mode Specific Updates
             if (currentGameMode === "EXPLORATION") {
                 updateExplorationState(data);
             } else {
-                // Check if we just switched to interaction and have no dialogue
-                // If so, trigger a greeting
-                const wasExploration = document.getElementById('interaction-view').classList.contains('hidden');
                 updateInteractionState(data);
 
-                if (wasExploration && !data.dialogue) {
-                    // Trigger greeting
-                    sendInteractionCommand("Hello"); // Or send a special 'init' flag if backend supported it
+                // Auto-Greeting Logic
+                if (prevMode === "EXPLORATION" && !data.dialogue) {
+                    sendInteractionCommand("Hello");
                 }
             }
 
             document.getElementById('status').className = 'status-indicator status-ok';
         }
 
-        function updateViewVisibility() {
+        function updateViewVisibility(prevMode) {
+            const explContent = document.getElementById('exploration-view-content');
+            const intContent = document.getElementById('interaction-view-content');
+            const explContext = document.getElementById('exploration-context');
+            const intContext = document.getElementById('interaction-context');
+
+            const navControls = document.getElementById('nav-controls');
+            const explActions = document.getElementById('expl-actions');
+            const intActions = document.getElementById('int-actions');
+
+            // Buttons to disable/enable
+            const navButtons = navControls.querySelectorAll('button');
+            const enterBtn = document.querySelector('#expl-actions button:last-child'); // Enter button
+
             if (currentGameMode === "EXPLORATION") {
-                explorationView.classList.remove('hidden');
-                interactionView.classList.add('hidden');
+                explContent.classList.remove('hidden');
+                intContent.classList.add('hidden');
+                explContext.classList.remove('hidden');
+                intContext.classList.add('hidden');
+
+                // Controls: Enable Nav
+                navButtons.forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.style.cursor = 'pointer';
+                });
+
+                // Enable Enter
+                if (enterBtn) {
+                    enterBtn.disabled = false;
+                    enterBtn.style.opacity = '1';
+                    enterBtn.style.cursor = 'pointer';
+                }
+
+                explActions.classList.remove('hidden');
+                intActions.classList.add('hidden');
+
+                mainInput.placeholder = "Type a command...";
             } else {
-                explorationView.classList.add('hidden');
-                interactionView.classList.remove('hidden');
+                explContent.classList.add('hidden');
+                intContent.classList.remove('hidden');
+                explContext.classList.add('hidden');
+                intContext.classList.remove('hidden');
+
+                // Controls: Disable Nav (don't hide)
+                navButtons.forEach(btn => {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.3';
+                    btn.style.cursor = 'not-allowed';
+                });
+
+                // Disable Enter (if visible, but we are hiding explActions anyway... wait, user said "disable NEWS buttons instead of hiding")
+                // User also said "Lock it" for Enter.
+                // Currently explActions is hidden in Interaction. 
+                // If we want to keep the structure, we should maybe NOT hide explActions but disable them?
+                // "if the interface structure doesn't change whether we're in conversation or navigation"
+                // Let's keep explActions visible but swap the buttons? Or just disable Enter?
+                // The user said "disable the NEWS buttons instead of hiding them".
+                // For Enter, "Better if we just locked it".
+                // But we have "Leave" and "Trade" in Interaction.
+                // So we swap the Action buttons (Expl vs Int) but keep Nav buttons visible (disabled).
+
+                explActions.classList.add('hidden'); // We swap these for Leave/Trade
+                intActions.classList.remove('hidden');
+
+                mainInput.placeholder = "Say something...";
             }
         }
 
@@ -253,14 +305,10 @@
                     card.style.transition = 'background 0.2s';
 
                     let locationText = "";
-                    let canTalk = true;
-
                     if (npc.distance === 0) {
                         locationText = "<span style='color:#4caf50'>Here</span>";
                     } else {
                         locationText = `<span style='color:#888'>${npc.distance} steps away</span>`;
-                        // Optional: Disable talk if too far?
-                        // canTalk = false; 
                     }
 
                     card.innerHTML = `
@@ -279,13 +327,10 @@
                     localList.appendChild(card);
                 });
             } else {
-                localList.innerHTML = '<div style="color: #888; font-style: italic;">No one is here.</div>';
+                localList.innerHTML = '<div style="color: #888; font-style: italic;">No one nearby.</div>';
             }
 
             // Chat Log (System messages)
-            // Note: We don't clear the log, just append new messages if any.
-            // But the backend doesn't return a "new message" field, it returns "dialogue".
-            // In exploration mode, "dialogue" is usually the location description or command response.
             if (data.dialogue) {
                 addMessage(data.dialogue, 'system', chatContainer);
             }
@@ -305,21 +350,19 @@
                 placeholder.style.display = 'flex';
             }
 
-            // Current Dialogue Bubble
-            const bubble = document.getElementById('current-dialogue-bubble');
-            if (data.dialogue) {
-                bubble.innerHTML = formatDialogue(data.dialogue);
-                bubble.style.display = 'block';
-                // Also add to history
-                addMessage(data.dialogue, 'model', dialogueContainer);
+            // NPC Name in Context
+            if (data.conversation_partner_name) {
+                document.getElementById('npc-name-display').textContent = data.conversation_partner_name;
+                // We could also update description if available, but name is most important.
+                document.getElementById('npc-desc-display').textContent = "In conversation...";
             } else {
-                bubble.style.display = 'none';
+                document.getElementById('npc-name-display').textContent = "Unknown";
             }
-        }
 
-        function formatDialogue(text) {
-            // Highlight text within quotes
-            return text.replace(/"([^"]*)"/g, '<span class="dialogue-quote">"$1"</span>');
+            // Dialogue
+            if (data.dialogue) {
+                addMessage(data.dialogue, 'model', chatContainer);
+            }
         }
 
         function renderMap(mapData) {
@@ -354,7 +397,12 @@
         function addMessage(text, type, container) {
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${type}`;
-            msgDiv.innerHTML = text.replace(/\n/g, '<br>');
+
+            // Format text
+            let formattedText = text.replace(/\n/g, '<br>');
+            formattedText = formattedText.replace(/"([^"]*)"/g, '<span class="dialogue-quote">"$1"</span>');
+
+            msgDiv.innerHTML = formattedText;
             container.appendChild(msgDiv);
             container.scrollTop = container.scrollHeight;
         }
@@ -363,42 +411,32 @@
         async function sendCommand(cmd) {
             if (!cmd) return;
 
-            // Determine endpoint based on mode
-            // Actually, we can route everything through /command for simplicity, 
-            // EXCEPT when we are "Saying" something in interaction mode, which is /interact.
-            // But wait, /command handles "talk to" which initiates interaction.
-
-            // If we are in INTERACTION mode and typing in the chat box, it's /interact.
-            // If we click "Leave", it's a command "leave".
+            // Optimistic UI update
+            addMessage(cmd, 'user', chatContainer);
 
             let endpoint = '/command';
             let payload = { session_id: sessionId, command: cmd };
-
-            // Optimistic UI update
-            if (currentGameMode === "EXPLORATION") {
-                addMessage(cmd, 'user', chatContainer);
-            } else {
-                addMessage(cmd, 'user', dialogueContainer);
-            }
 
             const res = await fetchFromServer(endpoint, payload);
             if (res) updateState(res);
         }
 
-        async function sendExplorationCommand() {
-            const cmd = explorationInput.value.trim();
+        async function sendMainCommand() {
+            const cmd = mainInput.value.trim();
             if (!cmd) return;
-            explorationInput.value = '';
-            sendCommand(cmd);
+            mainInput.value = '';
+
+            if (currentGameMode === "INTERACTION") {
+                sendInteractionCommand(cmd);
+            } else {
+                sendCommand(cmd);
+            }
         }
 
-        async function sendInteractionCommand() {
-            const msg = interactionInput.value.trim();
+        async function sendInteractionCommand(msg) {
             if (!msg) return;
-            interactionInput.value = '';
-
-            // Use /interact endpoint for conversation
-            addMessage(msg, 'user', dialogueContainer);
+            // Optimistic UI
+            addMessage(msg, 'user', chatContainer);
             const res = await fetchFromServer('/interact', { session_id: sessionId, message: msg });
             if (res) updateState(res);
         }
