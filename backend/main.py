@@ -159,11 +159,11 @@ async def interact_with_npc(user_input: UserInput):
         
         # Use dynamic greetings if available, otherwise fallback to NPC info or defaults
         greetings = npc_greetings if npc_greetings else npc_info.get("greetings", [
-            "Hello there.",
-            "Greetings, traveler.",
-            "What brings you here?",
-            "Can I help you?",
-            "Well met."
+            f"{npc_info['name']} looks up from their work. 'Greetings, traveler. What brings you here?'",
+            f"{npc_info['name']} nods in acknowledgement. 'Can I help you with something?'",
+            f"{npc_info['name']} pauses and regards you carefully. 'Well met. speak your mind.'",
+            f"{npc_info['name']} offers a weary smile. 'Another face in these parts? Welcome.'",
+            f"{npc_info['name']} seems busy but spares you a glance. 'Yes? What is it?'"
         ])
         
         import random
@@ -295,11 +295,11 @@ async def handle_command(command_input: CommandInput):
             
             # Use dynamic greetings if available, otherwise fallback
             greetings = npc_greetings if npc_greetings else npc_info.get("greetings", [
-                "Hello there.",
-                "Greetings, traveler.",
-                "What brings you here?",
-                "Can I help you?",
-                "Well met."
+                f"{npc_info['name']} looks up from their work. 'Greetings, traveler. What brings you here?'",
+                f"{npc_info['name']} nods in acknowledgement. 'Can I help you with something?'",
+                f"{npc_info['name']} pauses and regards you carefully. 'Well met. speak your mind.'",
+                f"{npc_info['name']} offers a weary smile. 'Another face in these parts? Welcome.'",
+                f"{npc_info['name']} seems busy but spares you a glance. 'Yes? What is it?'"
             ])
             
             import random

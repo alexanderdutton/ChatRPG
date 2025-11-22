@@ -196,7 +196,11 @@ async def generate_npc_memory_update(conversation_history: List[Dict],
         Task:
         1. Identify any significant new information {npc_name} learned about {player_name} or the world.
         2. Summarize this into a concise memory string (or multiple strings).
-        3. Evaluate the current greetings. Create 2-3 NEW, short greetings that reflect the current relationship and recent events.
+        3. Evaluate the current greetings. Create 2-3 NEW, narrative-style greetings.
+           - Each greeting should include a brief action describing what the NPC is doing when the player arrives.
+           - The dialogue should reference recent events or the current relationship state.
+           - Format: [Action description] "{npc_name} says: [Dialogue]"
+           - Example: Brom wipes soot from his brow and nods. "Ah, {player_name}. Did you find that ore I asked for?"
         
         Output JSON format:
         {{
