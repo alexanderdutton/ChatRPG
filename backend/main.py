@@ -197,7 +197,8 @@ async def interact_with_npc(user_input: UserInput):
             map_display=game_state_manager.get_map_display(session_id),
             character_portrait=portrait_url,
             game_mode=game_state_manager.get_game_mode(session_id),
-            conversation_partner_name=npc_info.get("name", "Unknown")
+            conversation_partner_name=npc_info.get("name", "Unknown"),
+            npcs_in_location=game_state_manager.get_npcs_in_location(session_id)
         )
 
     # Add personality prompt as system instruction
@@ -265,7 +266,8 @@ async def interact_with_npc(user_input: UserInput):
         map_display=game_state_manager.get_map_display(session_id),
         character_portrait=portrait_url,
         game_mode=game_state_manager.get_game_mode(session_id),
-        conversation_partner_name=npc_info.get("name", "Unknown") if npc_info else None
+        conversation_partner_name=npc_info.get("name", "Unknown") if npc_info else None,
+        npcs_in_location=game_state_manager.get_npcs_in_location(session_id)
     )
 
 
@@ -281,6 +283,13 @@ async def handle_command(command_input: CommandInput):
         logger.info(f"Session {session_id} not found. Creating a new session.")
         game_state_manager.create_session(session_id)
         logger.info(f"Created session {session_id} for command.")
+
+    # Capture state BEFORE processing command (because 'leave' will clear it)
+    session_data = game_state_manager._get_session_data(session_id)
+    logger.info(f"DEBUG: Full Session Data: {session_data}")
+    
+    pre_command_partner = game_state_manager.get_conversation_partner(session_id)
+    pre_command_history = game_state_manager.get_conversation_history(session_id)
 
     command_response_text = await game_state_manager.process_command(session_id,
                                                                 command_input.command)
@@ -345,15 +354,10 @@ async def handle_command(command_input: CommandInput):
              pass # Logic moved to inside process_command or handled here by peeking before call?
              # Peeking before call is safer.
     
-    # RE-IMPLEMENTING COMMAND PROCESSING TO CAPTURE CONTEXT FOR MEMORY UPDATE
-    # We need to do this BEFORE process_command clears the state.
-    
-    pre_command_partner = game_state_manager.get_conversation_partner(session_id)
-    pre_command_history = game_state_manager.get_conversation_history(session_id)
-    
     # ... (process_command called above) ...
     
     # If we successfully left a conversation
+    logger.info(f"Command: {command_input.command}, Partner: {pre_command_partner}, History Len: {len(pre_command_history) if pre_command_history else 0}")
     if command_input.command.lower() in ["leave", "exit", "bye", "goodbye"] and pre_command_partner and pre_command_history:
         logger.info(f"Ending conversation with {pre_command_partner}. Triggering memory update.")
         
@@ -366,6 +370,10 @@ async def handle_command(command_input: CommandInput):
         
         # Define async task
         async def update_memory_task():
+            logger.info(f"Starting memory update task for {pre_command_partner}...")
+            logger.info(f"History length: {len(pre_command_history)}")
+            logger.info(f"Current Memory: {current_memory}")
+            
             updates = await generate_npc_memory_update(
                 pre_command_history,
                 current_memory,
@@ -374,24 +382,30 @@ async def handle_command(command_input: CommandInput):
                 player_name
             )
             
+            logger.info(f"Received updates from LLM: {updates}")
+            
             if updates:
-                new_memory = updates.get("memory_update", [])
+                updated_memory = updates.get("updated_memory", [])
                 new_greetings = updates.get("new_greetings", [])
                 
-                # Update State
-                if new_memory:
-                    # Append new memories
-                    updated_memory = current_memory + new_memory
+                # Update State - REPLACE memory with consolidated version
+                if updated_memory:
                     game_state_manager.update_npc_state(session_id, pre_command_partner, {"memory": updated_memory})
-                    logger.info(f"Updated memory for {pre_command_partner}: {new_memory}")
+                    logger.info(f"Updated (Consolidated) memory for {pre_command_partner}: {updated_memory}")
+                else:
+                    logger.warning(f"No 'updated_memory' returned for {pre_command_partner}")
                 
                 if new_greetings:
                     game_state_manager.update_npc_state(session_id, pre_command_partner, {"greetings": new_greetings})
                     logger.info(f"Updated greetings for {pre_command_partner}: {new_greetings}")
+                else:
+                    logger.warning(f"No 'new_greetings' returned for {pre_command_partner}")
+            else:
+                logger.error(f"Failed to generate updates for {pre_command_partner} (updates is empty/None)")
 
-            # Archive/Clear History
-            game_state_manager.archive_conversation(session_id)
-
+        # Archive/Clear History IMMEDIATELY to prevent race conditions
+        game_state_manager.archive_conversation(session_id)
+        
         import asyncio
         asyncio.create_task(update_memory_task())
 
@@ -505,6 +519,25 @@ async def get_npc_portrait(npc_id: str):
 async def health_check():
     logger.info("Health check endpoint hit.")
     return {"status": "ok"}
+
+@app.get("/npc_debug/{session_id}/{npc_id}")
+async def get_npc_debug_info(session_id: str, npc_id: str):
+    """Returns debug information for a specific NPC."""
+    if not game_state_manager.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+        
+    npc_info = game_state_manager.get_npc_info(npc_id)
+    if not npc_info:
+        raise HTTPException(status_code=404, detail="NPC not found.")
+        
+    npc_state = game_state_manager.get_npc_state(session_id, npc_id)
+    
+    return {
+        "name": npc_info["name"],
+        "memory": npc_state.get("memory", []),
+        "greetings": npc_state.get("greetings", []),
+        "base_info": npc_info
+    }
 
 class LoadWorldInput(BaseModel):
     world_name: str

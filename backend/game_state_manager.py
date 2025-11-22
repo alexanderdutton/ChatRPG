@@ -1,7 +1,7 @@
 import sqlite3
 import json
 import os
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from .game_world import game_world
 from .gemini_service import generate_item_details, generate_quest
 import logging
@@ -127,6 +127,13 @@ class GameStateManager:
         exists = cursor.fetchone() is not None
         conn.close()
         return exists
+
+    def get_conversation_partner(self, session_id: str) -> Optional[str]:
+        """Retrieves the current conversation partner ID."""
+        data = self._get_session_data(session_id)
+        partner = data.get("conversation_partner")
+        # print(f"DEBUG: get_conversation_partner for {session_id} -> {partner}") # Commented out to reduce noise
+        return partner
 
     def get_conversation_history(self, session_id: str) -> List[Dict]:
         """Retrieves the conversation history for a given session."""
@@ -388,6 +395,7 @@ class GameStateManager:
         
         if game_mode == "INTERACTION":
             if command in ["leave", "exit", "bye", "quit"]:
+                print(f"DEBUG: Processing leave command. Current partner: {self.get_conversation_partner(session_id)}")
                 self.end_interaction(session_id)
                 return "You end the conversation."
             else:
@@ -560,6 +568,7 @@ class GameStateManager:
             if npc_state["location"] == current_location_name:
                 npc_info = self.get_npc_info(npc_id)
                 if npc_info and npc_info["name"].lower() == npc_name.lower():
+                    logger.info(f"Initiating dialogue with {npc_id} in session {session_id}")
                     self._update_session_field(session_id, "conversation_partner", npc_id)
                     self.set_game_mode(session_id, "INTERACTION")
                     return f"You begin a conversation with {npc_info['name']}."
@@ -568,6 +577,7 @@ class GameStateManager:
 
     def end_interaction(self, session_id: str):
         """Ends the current interaction and switches back to EXPLORATION mode."""
+        logger.info(f"Ending interaction in session {session_id}")
         self._update_session_field(session_id, "conversation_partner", None)
         self.set_game_mode(session_id, "EXPLORATION")
 

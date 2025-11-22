@@ -195,7 +195,10 @@ async def generate_npc_memory_update(conversation_history: List[Dict],
         
         Task:
         1. Identify any significant new information {npc_name} learned about {player_name} or the world.
-        2. Summarize this into a concise memory string (or multiple strings).
+        2. REWRITE the "Current Memory" list into a new, consolidated list.
+           - Combine old memories with new information.
+           - Remove obsolete or redundant details.
+           - Keep the list concise (aim for 5-10 key facts).
         3. Evaluate the current greetings. Create 2-3 NEW, narrative-style greetings.
            - Each greeting should include a brief action describing what the NPC is doing when the player arrives.
            - The dialogue should reference recent events or the current relationship state.
@@ -204,12 +207,11 @@ async def generate_npc_memory_update(conversation_history: List[Dict],
         
         Output JSON format:
         {{
-            "memory_update": ["memory string 1", "memory string 2"],
+            "updated_memory": ["consolidated memory 1", "consolidated memory 2"],
             "new_greetings": ["greeting 1", "greeting 2", "greeting 3"]
         }}
         
-        If nothing important happened, return empty list for memory_update.
-        ALWAYS return new_greetings to keep them fresh.
+        ALWAYS return updated_memory (even if it's just the old memory) and new_greetings.
         """
         
         response = client.models.generate_content(

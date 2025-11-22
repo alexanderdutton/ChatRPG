@@ -74,6 +74,18 @@
                                 </p>
                             </div>
                         </div>
+
+                        <!-- Debug Panel (Inline in Situation) -->
+                        <div id="debug-panel-container"
+                            style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+                            <button id="debug-btn" class="btn"
+                                style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                onclick="toggleDebugInline()">Debug NPC</button>
+                            <div id="debug-inline-content"
+                                style="display: none; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8em; color: #aaddff; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
+                                Select an NPC to view debug info.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -135,10 +147,11 @@
 
     <script>
         // --- State ---
-        let sessionId = localStorage.getItem('gameSessionId');
+        let sessionId = localStorage.getItem('chatrpg_session_id') || null;
         let currentGameMode = "EXPLORATION";
+        let currentNpcId = null; // Track current NPC for debug
 
-        // --- UI References ---
+        // --- DOM Elements ---
         const chatContainer = document.getElementById('chat-container');
         const mainInput = document.getElementById('main-input');
 
@@ -184,7 +197,7 @@
             // Update Session
             if (data.session_id) {
                 sessionId = data.session_id;
-                localStorage.setItem('gameSessionId', sessionId);
+                localStorage.setItem('chatrpg_session_id', sessionId);
             }
 
             // Update Game Mode
@@ -217,6 +230,13 @@
                     sendInteractionCommand("Hello");
                 }
             }
+
+            // Update NPCs in location for Debug Context
+            if (data.npcs_in_location) {
+                window.lastNpcsInLocation = data.npcs_in_location;
+            }
+
+            refreshDebugInfo();
 
             document.getElementById('status').className = 'status-indicator status-ok';
         }
@@ -355,8 +375,12 @@
                 document.getElementById('npc-name-display').textContent = data.conversation_partner_name;
                 // We could also update description if available, but name is most important.
                 document.getElementById('npc-desc-display').textContent = "In conversation...";
+
+                // Update current NPC ID for debug
+                currentNpcId = data.conversation_partner_name;
             } else {
                 document.getElementById('npc-name-display').textContent = "Unknown";
+                currentNpcId = null;
             }
 
             // Dialogue
@@ -439,6 +463,57 @@
             addMessage(msg, 'user', chatContainer);
             const res = await fetchFromServer('/interact', { session_id: sessionId, message: msg });
             if (res) updateState(res);
+        }
+
+        // --- Debug Inline Logic ---
+        // --- Debug Inline Logic ---
+        async function toggleDebugInline() {
+            const contentDiv = document.getElementById('debug-inline-content');
+            if (contentDiv.style.display === 'none') {
+                contentDiv.style.display = 'block';
+                updateDebugPanel();
+            } else {
+                contentDiv.style.display = 'none';
+            }
+        }
+
+        async function updateDebugPanel() {
+            const contentDiv = document.getElementById('debug-inline-content');
+            if (contentDiv.style.display === 'none') return;
+
+            // Determine target NPC: current partner OR first nearby NPC OR last known
+            let targetId = currentNpcId;
+
+            // If no current partner, try to find one from the last update
+            if (!targetId && window.lastNpcsInLocation && window.lastNpcsInLocation.length > 0) {
+                targetId = window.lastNpcsInLocation[0].name; // Assuming name is ID for now, or use ID if available
+                // Actually, npcs_in_location returns dicts with 'id' and 'name' usually? 
+                // Let's check backend. get_npcs_in_location returns list of dicts.
+                // We need to make sure we have the ID.
+                // In game_state_manager, get_npcs_in_location returns list of dicts with 'id', 'name', etc.
+                targetId = window.lastNpcsInLocation[0].id || window.lastNpcsInLocation[0].name;
+            }
+
+            if (targetId) {
+                contentDiv.textContent = "Loading debug info for " + targetId + "...";
+                try {
+                    const res = await fetch(`http://localhost:8000/npc_debug/${sessionId}/${targetId}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        contentDiv.textContent = JSON.stringify(data, null, 2);
+                    } else {
+                        contentDiv.textContent = "Error fetching debug info: " + res.status;
+                    }
+                } catch (e) {
+                    contentDiv.textContent = "Error: " + e.message;
+                }
+            } else {
+                contentDiv.textContent = "No NPC found in location to debug.";
+            }
+        }
+
+        function refreshDebugInfo() {
+            updateDebugPanel();
         }
 
     </script>
