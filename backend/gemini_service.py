@@ -17,16 +17,23 @@ if not API_KEY:
 
 client = genai.Client(api_key=API_KEY)
 
-# Print module paths for debugging
-print(f"Path for google.generativeai: {genai.__file__}")
-print(f"Path for google.generativeai.types: {genai.types.__file__}")
-
 def extract_json_metadata(text: str) -> Tuple[str, Dict[str, Any]]:
     """Extracts a JSON object from a string and returns the remaining text and
     the parsed JSON."""
+    # 1. Try strict markdown with json tag
     json_pattern = re.compile(r"```json(.*?)```", re.DOTALL)
     match = json_pattern.search(text)
     
+    # 2. Try generic markdown
+    if not match:
+        json_pattern = re.compile(r"```(.*?)```", re.DOTALL)
+        match = json_pattern.search(text)
+
+    # 3. Try raw JSON (first { to last })
+    if not match:
+        json_pattern = re.compile(r"(\{.*\})", re.DOTALL)
+        match = json_pattern.search(text)
+
     metadata = {}
     dialogue = text
 
@@ -34,7 +41,12 @@ def extract_json_metadata(text: str) -> Tuple[str, Dict[str, Any]]:
         json_str = match.group(1).strip()
         try:
             metadata = json.loads(json_str)
-            dialogue = json_pattern.sub("", text).strip()  # Remove the JSON block from the dialogue
+            # If the JSON contains a 'dialogue' field, use it as the primary dialogue
+            if "dialogue" in metadata:
+                dialogue = metadata["dialogue"]
+            else:
+                # Otherwise, remove the JSON block from the original text
+                dialogue = json_pattern.sub("", text).strip()
         except json.JSONDecodeError as e:
             logger.warning(
                 f"Failed to decode JSON from Gemini response: {e}"
@@ -224,3 +236,98 @@ async def generate_npc_memory_update(conversation_history: List[Dict],
     except Exception as e:
         logger.error(f"Error generating NPC memory update: {e}")
         return {}
+
+CHALLENGE_SYSTEM_PROMPT = """
+CHALLENGE GENERATION RULES:
+When the player asks for a quest or you determine the NPC has a task:
+
+1. IF you are offering a quest or giving a task, you MUST output a JSON object wrapped in markdown code blocks (```json ... ```).
+   The structure MUST be EXACTLY:
+{{
+  "dialogue": "Your spoken response here (e.g. 'I need your help with...')",
+  "quest_offered": {{
+    "id": "unique_quest_id",
+    "description": "Brief quest description",
+    "giver_npc": "NPC Name",
+    "accept_response": "What you will say if the player accepts the quest (e.g., 'Excellent! I knew I could count on you.')",
+    "refuse_response": "What you will say if the player refuses the quest (e.g., 'A pity. Perhaps another time.')",
+    "challenges": [
+        {{
+            "id": "challenge_id_1",
+            "type": "strength|dexterity|intelligence|charisma",
+            "difficulty": "easy|medium|hard|heroic",
+            "dc": 10|15|20|25,
+            "description": "Description of the specific challenge (e.g. 'Break down the door')"
+        }}
+    ],
+    "involved_entities": ["entity_id_1", "entity_id_2"]
+  }}
+}}
+
+2. Difficulty to DC mapping:
+   - easy: DC 10
+   - medium: DC 15
+   - hard: DC 20
+   - heroic: DC 25
+
+3. Choose challenge_type based on the quest nature:
+   - strength: Physical force, combat, breaking things
+   - dexterity: Stealth, agility, precision
+   - intelligence: Puzzles, knowledge, investigation
+   - charisma: Persuasion, deception, social interaction
+
+4. ONLY include entities that are:
+   - Already established in the world
+   - OR being introduced by this quest (mark in involved_entities)
+
+CURRENT PLAYER STATS:
+{player_stats}
+
+IMPORTANT: Do not invent new attributes for existing entities. 
+Stick to established facts from the world data.
+
+- **quest_resolved**: (Optional) The ID of a quest that the player has successfully turned in or resolved during this interaction. Use this ONLY when the player explicitly reports completion to the quest giver.
+
+- **skill_check**: (Optional) A JSON object representing an immediate skill check during conversation.
+    - **type**: One of "strength", "dexterity", "intelligence", "charisma".
+    - **difficulty**: "easy" (DC 10), "medium" (DC 15), "hard" (DC 20), "heroic" (DC 25).
+    - **dc**: The Difficulty Class integer.
+    - **description**: Description of the check (e.g., "Persuade the guard").
+    - **success_response**: What you will say if the player succeeds (e.g., "Very well, you make a compelling point.").
+    - **failure_response**: What you will say if the player fails (e.g., "I don't think so. Move along.").
+
+IMPORTANT: You MUST output valid JSON. If you are offering a quest, the 'quest_offered' field is mandatory. If resolving a quest, 'quest_resolved' is mandatory. Do not just write the dialogue.
+"""
+
+def validate_quest_output(quest_data: Dict[str, Any]) -> List[str]:
+    """Returns list of validation errors, empty if valid."""
+    errors = []
+    
+    # Check for required fields in Quest
+    required_quest = ["id", "description", "challenges", "accept_response", "refuse_response"]
+    for field in required_quest:
+        if field not in quest_data:
+            errors.append(f"Missing required field in quest: {field}")
+            
+    if "challenges" in quest_data:
+        for challenge in quest_data["challenges"]:
+            # Check difficulty matches DC
+            dc_map = {"easy": 10, "medium": 15, "hard": 20, "heroic": 25}
+            difficulty = challenge.get("difficulty")
+            dc = challenge.get("dc")
+            
+            if difficulty and dc and dc != dc_map.get(difficulty):
+                errors.append(f"DC {dc} doesn't match difficulty level {difficulty}")
+            
+            # Check challenge type is valid
+            valid_types = ["strength", "dexterity", "intelligence", "charisma"]
+            if challenge.get("type") not in valid_types:
+                errors.append(f"Invalid challenge type: {challenge.get('type')}")
+            
+            # Check for required fields in Challenge
+            required_challenge = ["id", "type", "dc", "description"]
+            for field in required_challenge:
+                if field not in challenge:
+                    errors.append(f"Missing required field in challenge: {field}")
+    
+    return errors

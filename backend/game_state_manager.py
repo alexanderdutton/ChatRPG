@@ -43,6 +43,72 @@ class GameStateManager:
         except sqlite3.OperationalError:
             pass # Column likely already exists
 
+        # Attempt to add response columns to quests table (migration)
+        try:
+            cursor.execute("ALTER TABLE quests ADD COLUMN accept_response TEXT")
+            cursor.execute("ALTER TABLE quests ADD COLUMN refuse_response TEXT")
+        except sqlite3.OperationalError:
+            pass # Columns likely already exist
+
+        conn.commit()
+        
+        # New Tables for Challenge System
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS player_stats (
+                session_id TEXT PRIMARY KEY,
+                strength INTEGER DEFAULT 10,
+                dexterity INTEGER DEFAULT 10,
+                intelligence INTEGER DEFAULT 10,
+                charisma INTEGER DEFAULT 10,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS quests (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                giver_npc TEXT,
+                description TEXT,
+                status TEXT DEFAULT 'active',
+                involved_entities TEXT,
+                accept_response TEXT,
+                refuse_response TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS challenges (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                quest_id TEXT,
+                type TEXT,
+                dc INTEGER,
+                description TEXT,
+                completed BOOLEAN DEFAULT FALSE,
+                result TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entity_stubs (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                name TEXT,
+                type TEXT,
+                description TEXT,
+                related_to TEXT,
+                status TEXT,
+                needs_expansion BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+        ''')
+        
         conn.commit()
         conn.close()
 
@@ -116,6 +182,11 @@ class GameStateManager:
             json.dumps([]), 100, 0, json.dumps([]), json.dumps(npc_states), json.dumps([]), None, "EXPLORATION"
         ))
         conn.commit()
+
+        # Initialize Player Stats
+        cursor.execute('INSERT INTO player_stats (session_id) VALUES (?)', (session_id,))
+        conn.commit()
+        
         conn.close()
         print(f"Session {session_id} created with initial NPC states.")
 
@@ -637,3 +708,253 @@ class GameStateManager:
         row = cursor.fetchone()
         conn.close()
         return row[0] if row else None
+
+    # --- Challenge System Methods ---
+
+    def get_player_stats(self, session_id: str) -> Dict[str, int]:
+        """Retrieves player stats."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT strength, dexterity, intelligence, charisma FROM player_stats WHERE session_id = ?", (session_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return dict(row)
+        return {"strength": 10, "dexterity": 10, "intelligence": 10, "charisma": 10}
+
+    def add_quest(self, session_id: str, quest_data: Dict[str, Any]):
+        """Adds a quest and its challenges to the database."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Insert Quest
+        # Insert Quest (OR REPLACE to handle re-offers)
+        cursor.execute('''
+            INSERT OR REPLACE INTO quests (id, session_id, giver_npc, description, status, involved_entities, accept_response, refuse_response)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            quest_data['id'], 
+            session_id, 
+            quest_data['giver_npc'], 
+            quest_data['description'], 
+            'offered', # Default status when added via offer
+            json.dumps(quest_data.get('involved_entities', [])),
+            quest_data.get('accept_response', "I'm glad you accepted."),
+            quest_data.get('refuse_response', "That is unfortunate.")
+        ))
+
+        # Insert Challenges
+        if 'challenges' in quest_data:
+            for challenge in quest_data['challenges']:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO challenges (id, session_id, quest_id, type, dc, description, completed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    challenge['id'], # Assuming ID is provided or generated
+                    session_id,
+                    quest_data['id'],
+                    challenge['type'],
+                    challenge['dc'],
+                    challenge['description'],
+                    False
+                ))
+        
+        conn.commit()
+        conn.close()
+
+    def accept_quest(self, session_id: str, quest_id: str) -> str:
+        """Updates quest status to 'active' and returns accept response."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get response text
+        cursor.execute("SELECT accept_response FROM quests WHERE id = ? AND session_id = ?", (quest_id, session_id))
+        row = cursor.fetchone()
+        response_text = row['accept_response'] if row and row['accept_response'] else "Quest accepted."
+        
+        cursor.execute("UPDATE quests SET status = 'active' WHERE id = ? AND session_id = ?", (quest_id, session_id))
+        conn.commit()
+        conn.close()
+        return response_text
+
+    def refuse_quest(self, session_id: str, quest_id: str) -> str:
+        """Updates quest status to 'refused' and returns refuse response."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get response text
+        cursor.execute("SELECT refuse_response FROM quests WHERE id = ? AND session_id = ?", (quest_id, session_id))
+        row = cursor.fetchone()
+        response_text = row['refuse_response'] if row and row['refuse_response'] else "Quest refused."
+        
+        cursor.execute("UPDATE quests SET status = 'refused' WHERE id = ? AND session_id = ?", (quest_id, session_id))
+        conn.commit()
+        conn.close()
+        return response_text
+        
+        # Process involved entities
+        if 'involved_entities' in quest_data:
+            self.process_involved_entities(session_id, quest_data['involved_entities'])
+
+    def get_active_quests(self, session_id: str) -> List[Dict[str, Any]]:
+        """Retrieves active quests and their challenges."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM quests WHERE session_id = ? AND status IN ('active', 'completed', 'failed')", (session_id,))
+        quests = [dict(row) for row in cursor.fetchall()]
+        logger.info(f"get_active_quests for {session_id}: Found {len(quests)} quests. IDs: {[q['id'] for q in quests]}")
+        
+        for quest in quests:
+            cursor.execute("SELECT * FROM challenges WHERE quest_id = ?", (quest['id'],))
+            quest['challenges'] = [dict(row) for row in cursor.fetchall()]
+            quest['involved_entities'] = json.loads(quest['involved_entities']) if quest['involved_entities'] else []
+            
+        conn.close()
+        return quests
+
+    def get_quest_context_for_npc(self, session_id: str) -> List[Dict[str, Any]]:
+        """Retrieves quests for NPC context (active, completed, failed). Excludes resolved."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM quests WHERE session_id = ? AND status IN ('active', 'completed', 'failed')", (session_id,))
+        quests = [dict(row) for row in cursor.fetchall()]
+        
+        for quest in quests:
+            cursor.execute("SELECT * FROM challenges WHERE quest_id = ?", (quest['id'],))
+            quest['challenges'] = [dict(row) for row in cursor.fetchall()]
+            quest['involved_entities'] = json.loads(quest['involved_entities']) if quest['involved_entities'] else []
+            
+        conn.close()
+        return quests
+
+    def resolve_quest(self, session_id: str, quest_id: str):
+        """Marks a quest as resolved (turned in)."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE quests SET status = 'resolved' WHERE id = ? AND session_id = ?", (quest_id, session_id))
+        conn.commit()
+        conn.close()
+
+    def clear_dead_quests(self, session_id: str):
+        """Force-resolves all quests that are 'completed' or 'failed'."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE quests SET status = 'resolved' WHERE session_id = ? AND status IN ('completed', 'failed')", (session_id,))
+        count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return count
+
+    def resolve_challenge(self, session_id: str, challenge_id: str) -> Dict[str, Any]:
+        """Resolves a challenge with dice mechanics."""
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get Challenge
+        cursor.execute("SELECT * FROM challenges WHERE id = ? AND session_id = ?", (challenge_id, session_id))
+        challenge_row = cursor.fetchone()
+        
+        if not challenge_row:
+            conn.close()
+            return {"error": "Challenge not found"}
+            
+        challenge = dict(challenge_row)
+        
+        # Get Stats
+        stats = self.get_player_stats(session_id)
+        stat_bonus = stats.get(challenge['type'].lower(), 0) # Raw score as bonus for now, or (score-10)//2
+        # User said: "Success Threshold (dice roll + stat vs. DC)" - implying raw stat? 
+        # "strength: 5" in example. D&D usually is modifier. 
+        # But user example: "strength": 5. 
+        # Let's assume raw stat for simplicity as per user prompt "roll(1d20) + player.stats[challenge_type]".
+        
+        import random
+        roll = random.randint(1, 20)
+        total = roll + stat_bonus
+        success = total >= challenge['dc']
+        
+        result = {
+            "success": success,
+            "roll": roll,
+            "stat_bonus": stat_bonus,
+            "total": total,
+            "dc": challenge['dc'],
+            "margin": total - challenge['dc'],
+            "challenge_type": challenge['type'],
+            "description": challenge['description'],
+            "critical_success": roll == 20,
+            "critical_failure": roll == 1
+        }
+        
+        # Update Challenge
+        cursor.execute('''
+            UPDATE challenges 
+            SET completed = ?, result = ? 
+            WHERE id = ?
+        ''', (True, json.dumps(result), challenge_id))
+        
+        conn.commit()
+        
+        # Check if all challenges for this quest are completed
+        quest_id = challenge['quest_id']
+        cursor.execute("SELECT COUNT(*) FROM challenges WHERE quest_id = ? AND completed = 0", (quest_id,))
+        remaining = cursor.fetchone()[0]
+        
+        if remaining == 0:
+            # All challenges completed! Check results.
+            cursor.execute("SELECT result FROM challenges WHERE quest_id = ?", (quest_id,))
+            results = cursor.fetchall()
+            
+            any_failure = False
+            for res_row in results:
+                if res_row[0]:
+                    res_dict = json.loads(res_row[0])
+                    if not res_dict.get('success', False):
+                        any_failure = True
+                        break
+            
+            new_status = 'failed' if any_failure else 'completed'
+            cursor.execute("UPDATE quests SET status = ? WHERE id = ?", (new_status, quest_id))
+            conn.commit()
+            
+        conn.close()
+        
+        return result
+
+    def process_involved_entities(self, session_id: str, entities: List[str]):
+        """Checks if entities exist, creates stubs if not."""
+        # 1. Check Game World (Static)
+        # 2. Check NPC States (Dynamic)
+        # 3. Check Entity Stubs (Dynamic)
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        for entity_id in entities:
+            # Check if known in game world
+            if game_world.get_character(entity_id) or game_world.get_location(entity_id):
+                continue
+                
+            # Check if exists in stubs
+            cursor.execute("SELECT 1 FROM entity_stubs WHERE id = ? AND session_id = ?", (entity_id, session_id))
+            if cursor.fetchone():
+                continue
+                
+            # Create Stub
+            stub_name = entity_id.replace("_", " ").title()
+            cursor.execute('''
+                INSERT INTO entity_stubs (id, session_id, name, type, status, needs_expansion)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (entity_id, session_id, stub_name, "unknown", "mentioned", True))
+            logger.info(f"Created entity stub for: {entity_id}")
+            
+        conn.commit()
+        conn.close()

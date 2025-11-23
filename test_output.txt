@@ -1,0 +1,14 @@
+test_entity_stub_creation (backend.tests.test_challenge_system.TestChallengeSystem.test_entity_stub_creation) ... C:\Projects\_GeminiAssist\ChatRPG\backend\game_world.py:60: PydanticDeprecatedSince20: The `parse_obj` method is deprecated; use `model_validate` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+  game_data = GameWorldData.parse_obj(game_data_dict)
+ok
+test_resolve_challenge (backend.tests.test_challenge_system.TestChallengeSystem.test_resolve_challenge) ... ok
+test_validate_quest_output (backend.tests.test_challenge_system.TestChallengeSystem.test_validate_quest_output) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.148s
+
+OK
+GameStateManager initialized with SQLite.
+Session test_session_challenge created with initial NPC states.
+GameStateManager initialized with SQLite.
+GameStateManager initialized with SQLite.

@@ -5,6 +5,28 @@ class Feature(BaseModel):
     name: str
     description: str
 
+class PlayerStats(BaseModel):
+    strength: int = 10
+    dexterity: int = 10
+    intelligence: int = 10
+    charisma: int = 10
+
+class Challenge(BaseModel):
+    id: str
+    quest_id: str
+    type: str  # "strength", "dexterity", "intelligence", "charisma"
+    dc: int
+    description: str
+    completed: bool = False
+
+class Quest(BaseModel):
+    id: str
+    description: str
+    giver_npc: str
+    involved_entities: List[str] = []
+    status: str = "active"  # "active", "completed", "failed"
+    challenges: List[Challenge] = []
+
 class Character(BaseModel):
     name: str
     race: str

@@ -37,56 +37,109 @@
                 <div id="interaction-view-content" class="view-content hidden">
                     <div class="portrait-wrapper">
                         <img id="character-portrait" src="" alt="Portrait">
+                        <div id="debug-inline-content-interaction"
+                            style="display:none; margin-top:10px; font-family:monospace; font-size:0.8em; white-space:pre-wrap; color:#ccc;">
+                        </div>
                         <div id="portrait-placeholder" class="portrait-placeholder">?</div>
                     </div>
                 </div>
             </div>
 
-            <!-- TOP RIGHT: CONTEXT (Situation) -->
+            <!-- TOP RIGHT: STATS PANEL -->
             <div class="grid-cell top-right" id="context-panel">
-                <div class="panel-header">Situation</div>
-                <div class="scrollable-content">
-                    <!-- Exploration Context -->
-                    <div id="exploration-context">
-                        <div class="stat-card">
-                            <h3>When</h3>
-                            <div class="stat-row"><span>Time</span> <span>Day 1, Morning</span></div>
-                        </div>
-                        <div class="stat-card">
-                            <h3>Where</h3>
-                            <div class="stat-row"><span id="context-location">...</span></div>
-                        </div>
-                        <div class="stat-card">
-                            <h3>Who & What</h3>
-                            <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
-                                <div style="color: #888; font-style: italic;">No one nearby.</div>
+
+                <!-- Time & Place (Always Visible) -->
+                <div id="time-place-container"
+                    style="padding: 15px; border-bottom: 1px solid #333; text-align: center;">
+                    <div id="game-time" style="color: #888; font-size: 0.9em;">Day 1, Morning</div>
+                    <div id="context-location" style="color: var(--accent-color); font-weight: bold; font-size: 1.1em;">
+                        Unknown Location</div>
+                </div>
+
+                <!-- Accordion Container -->
+                <div id="stats-accordion" class="scrollable-content" style="padding: 0; gap: 0;">
+
+                    <!-- 1. Character Stats -->
+                    <div class="accordion-item">
+                        <button class="accordion-header" onclick="toggleAccordion('acc-stats')">Character Stats</button>
+                        <div id="acc-stats" class="accordion-content open">
+                            <div style="padding: 15px;">
+                                <div id="player-stats-display"
+                                    style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.9em; color: #ccc;">
+                                    <div>STR: <span id="stat-str" style="color:white">10</span></div>
+                                    <div>DEX: <span id="stat-dex" style="color:white">10</span></div>
+                                    <div>INT: <span id="stat-int" style="color:white">10</span></div>
+                                    <div>CHA: <span id="stat-cha" style="color:white">10</span></div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Interaction Context -->
-                    <div id="interaction-context" class="hidden">
-                        <div class="stat-card">
-                            <h3>Interaction</h3>
-                            <div id="npc-details">
-                                <h3 id="npc-name-display" style="color: var(--accent-color); margin:0;">Unknown</h3>
-                                <p id="npc-desc-display" style="font-size: 0.9rem; color: #ccc; margin-top: 5px;">...
-                                </p>
-                            </div>
-                        </div>
-
-                        <!-- Debug Panel (Inline in Situation) -->
-                        <div id="debug-panel-container"
-                            style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-                            <button id="debug-btn" class="btn"
-                                style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
-                                onclick="toggleDebugInline()">Debug NPC</button>
-                            <div id="debug-inline-content"
-                                style="display: none; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8em; color: #aaddff; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
-                                Select an NPC to view debug info.
+                    <!-- 2. Active Quests -->
+                    <div class="accordion-item">
+                        <button class="accordion-header" onclick="toggleAccordion('acc-quests')">Active Quests</button>
+                        <div id="acc-quests" class="accordion-content">
+                            <div id="active-quests-list" style="padding: 15px;">
+                                <div style="color: #888; font-style: italic; font-size: 0.8em;">No active quests.</div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- 3. Local (Situation) -->
+                    <div class="accordion-item">
+                        <button class="accordion-header" onclick="toggleAccordion('acc-local')">Local</button>
+                        <div id="acc-local" class="accordion-content open">
+                            <div style="padding: 15px;">
+                                <!-- Exploration Context -->
+                                <div id="exploration-context">
+                                    <div class="stat-card" style="border:none; background:none; padding:0;">
+                                        <h3 style="margin-top:0;">Nearby</h3>
+                                        <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
+                                            <div style="color: #888; font-style: italic;">No one nearby.</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Interaction Context -->
+                                <div id="interaction-context" class="hidden">
+                                    <div class="stat-card" style="border:none; background:none; padding:0;">
+                                        <h3 style="margin-top:0;">Interaction</h3>
+                                        <div id="npc-details">
+                                            <h3 id="npc-name-display"
+                                                style="color: var(--accent-color); margin:0; border:none;">Unknown</h3>
+                                            <p id="npc-desc-display"
+                                                style="font-size: 0.9rem; color: #ccc; margin-top: 5px;">...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Debug -->
+                    <div class="accordion-item">
+                        <button class="accordion-header" onclick="toggleAccordion('acc-debug')">Debug</button>
+                        <div id="acc-debug" class="accordion-content">
+                            <div style="padding: 15px;">
+                                <div id="debug-panel-container">
+                                    <button id="debug-btn" class="btn"
+                                        style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                        onclick="toggleDebugInline()">Refresh Debug Info</button>
+                                    <button class="btn"
+                                        style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                        onclick="testQuestUI()">Test Quest UI</button>
+                                    <button class="btn btn-danger"
+                                        style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                        onclick="clearDeadQuests()">Clear Dead Quests</button>
+                                    <div id="debug-inline-content"
+                                        style="display: none; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8em; color: #aaddff; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
+                                        Select an NPC to view debug info.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
@@ -171,7 +224,44 @@
             mainInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') sendMainCommand();
             });
+
+            // Restore Accordion State
+            restoreAccordionState();
         };
+
+        // --- Accordion Logic ---
+        function toggleAccordion(id) {
+            const content = document.getElementById(id);
+            const btn = content.previousElementSibling; // The button
+
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                btn.classList.remove('active');
+                localStorage.setItem('accordion_' + id, 'closed');
+            } else {
+                content.classList.add('open');
+                btn.classList.add('active');
+                localStorage.setItem('accordion_' + id, 'open');
+            }
+        }
+
+        function restoreAccordionState() {
+            const ids = ['acc-stats', 'acc-quests', 'acc-local', 'acc-debug'];
+            ids.forEach(id => {
+                const state = localStorage.getItem('accordion_' + id);
+                const content = document.getElementById(id);
+                const btn = content.previousElementSibling;
+
+                if (state === 'closed') {
+                    content.classList.remove('open');
+                    btn.classList.remove('active');
+                } else if (state === 'open') {
+                    content.classList.add('open');
+                    btn.classList.add('active');
+                }
+                // Default behavior is defined in HTML (open or not)
+            });
+        }
 
         // --- API ---
         async function fetchFromServer(endpoint, body) {
@@ -203,6 +293,7 @@
             // Update Game Mode
             const prevMode = currentGameMode;
             currentGameMode = data.game_mode || "EXPLORATION";
+            console.log(`updateState: Mode changed from ${prevMode} to ${currentGameMode}`);
 
             // Update View Visibility
             updateViewVisibility(prevMode);
@@ -236,12 +327,232 @@
                 window.lastNpcsInLocation = data.npcs_in_location;
             }
 
-            refreshDebugInfo();
+            // Update Player Stats
+            if (data.player_stats) {
+                document.getElementById('stat-str').textContent = data.player_stats.strength;
+                document.getElementById('stat-dex').textContent = data.player_stats.dexterity;
+                document.getElementById('stat-int').textContent = data.player_stats.intelligence;
+                document.getElementById('stat-cha').textContent = data.player_stats.charisma;
+            }
 
+            // Update Active Quests
+            updateActiveQuests(data.active_quests);
+
+            refreshDebugInfo();
             document.getElementById('status').className = 'status-indicator status-ok';
         }
 
+        function updateActiveQuests(quests) {
+            const list = document.getElementById('active-quests-list');
+            list.innerHTML = '';
+
+            if (!quests || quests.length === 0) {
+                list.innerHTML = '<div style="color: #888; font-style: italic; font-size: 0.8em;">No active quests.</div>';
+                return;
+            }
+
+            // Filter for relevant quests (active, completed, failed)
+            const visibleQuests = quests.filter(q => ['active', 'completed', 'failed'].includes(q.status));
+
+            if (visibleQuests.length === 0) {
+                list.innerHTML = '<div style="color: #888; font-style: italic; font-size: 0.8em;">No active quests.</div>';
+                return;
+            }
+
+            visibleQuests.forEach(quest => {
+                const item = document.createElement('div');
+                item.style.marginBottom = '10px';
+                item.style.padding = '5px';
+                item.style.background = 'rgba(255,255,255,0.05)';
+
+                // Status Styling
+                let statusMsg = "";
+                if (quest.status === 'completed') {
+                    item.style.borderLeft = '4px solid #4caf50'; // Green
+                    statusMsg = '<div style="color:#4caf50; font-weight:bold; font-size:0.8em; margin-bottom:3px;">✓ Ready to Turn In</div>';
+                } else if (quest.status === 'failed') {
+                    item.style.borderLeft = '4px solid #f44336'; // Red
+                    statusMsg = '<div style="color:#f44336; font-weight:bold; font-size:0.8em; margin-bottom:3px;">✕ Quest Failed - Return to NPC</div>';
+                } else {
+                    item.style.borderLeft = '2px solid var(--accent-color)'; // Default Blue/Accent
+                }
+
+                let challengesHtml = '';
+                if (quest.challenges) {
+                    quest.challenges.forEach(ch => {
+                        // Parse result if available
+                        let result = null;
+                        if (ch.result) {
+                            try { result = JSON.parse(ch.result); } catch (e) { }
+                        }
+
+                        const isSuccess = result ? result.success : ch.completed; // Fallback
+                        const statusColor = ch.completed ? (isSuccess ? '#4caf50' : '#f44336') : '#ff9800';
+                        const statusIcon = ch.completed ? (isSuccess ? '✓' : '✕') : '○';
+
+                        // Roll Button (only if not completed and quest is active)
+                        let rollBtn = '';
+                        if (!ch.completed && quest.status === 'active') {
+                            if (currentGameMode === "EXPLORATION") {
+                                rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px;" onclick="rollChallenge('${quest.id}', '${ch.id}', '${ch.type}', ${ch.dc})">Roll</button>`;
+                            } else {
+                                rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px; opacity: 0.5; cursor: not-allowed;" title="Cannot roll during conversation" disabled>Roll</button>`;
+                            }
+                        }
+
+                        challengesHtml += `
+                            <div style="font-size: 0.85em; margin-top: 3px; display:flex; align-items:center; justify-content:space-between;">
+                                <span><span style="color:${statusColor}">${statusIcon}</span> ${ch.description} (DC ${ch.dc} ${ch.type})</span>
+                                ${rollBtn}
+                            </div>
+                        `;
+                    });
+                }
+
+                item.innerHTML = `
+                    ${statusMsg}
+                    <div style="font-weight:bold; font-size:0.9em;">${quest.description}</div>
+                    <div style="font-size:0.8em; color:#aaa;">Giver: ${quest.giver_npc}</div>
+                    <div style="margin-top:5px; padding-left:10px;">
+                        ${challengesHtml}
+                    </div>
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        function handleQuestOffer(quest) {
+            console.log("Handling Quest Offer:", quest);
+            const questDiv = document.createElement('div');
+            questDiv.className = 'message system';
+            questDiv.style.border = '1px solid var(--accent-color)';
+            questDiv.style.padding = '10px';
+            questDiv.style.marginTop = '10px';
+
+            questDiv.innerHTML = `
+                                <div style="font-weight:bold; color:var(--accent-color); margin-bottom:5px;">Quest Offered: ${quest.description}</div>
+                <div style="font-size:0.9em; margin-bottom:10px;">
+                    <div><strong>Giver:</strong> ${quest.giver_npc}</div>
+                    <div><strong>Challenge:</strong> ${quest.challenges[0].description} (DC ${quest.challenges[0].dc} ${quest.challenges[0].type})</div>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn" onclick="acceptQuest('${quest.id}', this)">Accept</button>
+                    <button class="btn btn-danger" onclick="refuseQuest('${quest.id}', this)">Refuse</button>
+                </div>
+                            `;
+
+            document.getElementById('chat-container').appendChild(questDiv);
+            scrollToBottom();
+        }
+
+
+
+        async function acceptQuest(questId, btn) {
+            console.log("acceptQuest called for:", questId);
+            const container = btn.parentElement;
+            const buttons = container.querySelectorAll('button');
+            buttons.forEach(b => b.disabled = true);
+
+            try {
+                console.log("Sending /accept_quest request...");
+                const response = await fetchFromServer('/accept_quest', {
+                    session_id: sessionId,
+                    quest_id: questId
+                });
+                console.log("Response from /accept_quest:", response);
+
+                if (response && response.status === 'success') {
+                    console.log("Quest acceptance successful. Updating UI.");
+                    container.innerHTML = '<span style="color:#4caf50; font-weight:bold;">Quest Accepted</span>';
+                    // Refresh state to show in active quests
+                    fetchGameState();
+
+                    // Display pre-generated response
+                    if (response.npc_response) {
+                        addMessage(response.npc_response, 'model', document.getElementById('chat-container'));
+                    }
+                } else {
+                    console.error("Quest acceptance failed or status not success:", response);
+                    buttons.forEach(b => b.disabled = false);
+                }
+            } catch (error) {
+                console.error('Error accepting quest:', error);
+                buttons.forEach(b => b.disabled = false);
+            }
+        }
+
+        async function refuseQuest(questId, btn) {
+            console.log("refuseQuest called for:", questId);
+            const container = btn.parentElement;
+            const buttons = container.querySelectorAll('button');
+            buttons.forEach(b => b.disabled = true);
+
+            try {
+                console.log("Sending /refuse_quest request...");
+                const response = await fetchFromServer('/refuse_quest', {
+                    session_id: sessionId,
+                    quest_id: questId
+                });
+                console.log("Response from /refuse_quest:", response);
+
+                if (response && response.status === 'success') {
+                    console.log("Quest refusal successful. Updating UI.");
+                    container.innerHTML = '<span style="color:#f44336; font-weight:bold;">Quest Refused</span>';
+
+                    // Display pre-generated response
+                    if (response.npc_response) {
+                        addMessage(response.npc_response, 'model', document.getElementById('chat-container'));
+                    }
+                } else {
+                    console.error("Quest refusal failed or status not success:", response);
+                    buttons.forEach(b => b.disabled = false);
+                }
+            } catch (error) {
+                console.error('Error refusing quest:', error);
+                buttons.forEach(b => b.disabled = false);
+            }
+        }
+
+        async function sendSystemMessage(text) {
+            // Display as user action (italics/system style)
+            const chatContainer = document.getElementById('chat-container');
+            addMessage(text, 'user', chatContainer);
+
+            try {
+                const data = await fetchFromServer('/interact', {
+                    session_id: sessionId,
+                    message: text
+                });
+                updateState(data);
+            } catch (error) {
+                console.error('Error sending system message:', error);
+            }
+        }
+        async function rollChallenge(questId, challengeId, challengeType, challengeDc) {
+            if (!confirm("Roll for this challenge?")) return;
+
+            const res = await fetchFromServer('/resolve_challenge', { session_id: sessionId, challenge_id: challengeId });
+
+            if (res) {
+                // Show Result in Chat
+                let msg = `<strong>Challenge Result:</strong> Rolled ${res.roll} + ${res.stat_bonus} = ${res.total} (DC ${res.dc}). `;
+                msg += res.success ? "<span style='color:#4caf50; font-weight:bold;'>SUCCESS!</span>" : "<span style='color:#f44336; font-weight:bold;'>FAILURE.</span>";
+                if (res.critical_success) msg += " <span style='color:gold; font-weight:bold;'>CRITICAL SUCCESS!</span>";
+                if (res.critical_failure) msg += " <span style='color:darkred; font-weight:bold;'>CRITICAL FAILURE!</span>";
+
+                addMessage(msg, 'system', chatContainer);
+
+                // Refresh Game State to update quest log
+                await fetchGameState();
+
+                // Report back to LLM (handled silently by backend now)
+                // We no longer send an interaction command here to avoid triggering an immediate response.
+                console.log("Challenge resolved. Backend history updated.");
+            }
+        }
+
         function updateViewVisibility(prevMode) {
+            console.log(`updateViewVisibility: Current Mode: ${currentGameMode}, Prev Mode: ${prevMode}`);
             const explContent = document.getElementById('exploration-view-content');
             const intContent = document.getElementById('interaction-view-content');
             const explContext = document.getElementById('exploration-context');
@@ -431,6 +742,17 @@
             container.scrollTop = container.scrollHeight;
         }
 
+        async function fetchGameState() {
+            try {
+                const data = await fetchFromServer('/state', { session_id: sessionId });
+                if (data) {
+                    updateState(data);
+                }
+            } catch (error) {
+                console.error("Error fetching game state:", error);
+            }
+        }
+
         // --- Commands ---
         async function sendCommand(cmd) {
             if (!cmd) return;
@@ -462,7 +784,77 @@
             // Optimistic UI
             addMessage(msg, 'user', chatContainer);
             const res = await fetchFromServer('/interact', { session_id: sessionId, message: msg });
-            if (res) updateState(res);
+            console.log("Interaction Response:", res); // Debug log
+            if (res) {
+                updateState(res);
+                if (res.metadata && res.metadata.quest_offered) {
+                    console.log("Quest offer found in metadata, triggering handler.");
+                    handleQuestOffer(res.metadata.quest_offered);
+                } else {
+                    console.log("No quest_offered in metadata.");
+                }
+
+                // Check for Skill Check
+                if (res.skill_check) {
+                    handleSkillCheck(res.skill_check);
+                } else if (res.metadata && res.metadata.skill_check) {
+                    handleSkillCheck(res.metadata.skill_check);
+                }
+            }
+        }
+
+        function handleSkillCheck(check) {
+            const container = document.getElementById('chat-container');
+            const checkDiv = document.createElement('div');
+            checkDiv.style.background = 'rgba(100, 50, 255, 0.1)';
+            checkDiv.style.border = '1px solid #88f';
+            checkDiv.style.padding = '10px';
+            checkDiv.style.margin = '10px 0';
+            checkDiv.style.borderRadius = '5px';
+            checkDiv.id = 'active-skill-check';
+
+            // Escape strings for onclick
+            const safeSuccess = check.success_response.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeFailure = check.failure_response.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const safeDesc = check.description.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+            checkDiv.innerHTML = `
+                <div style="font-weight:bold; color:#aaf; margin-bottom:5px;">Skill Check: ${check.type.toUpperCase()}</div>
+                <div style="margin-bottom:10px;">${check.description} (DC ${check.dc})</div>
+                <button class="btn" onclick="performSkillCheck('${check.type}', ${check.dc}, '${safeSuccess}', '${safeFailure}', '${safeDesc}')">Roll</button>
+             `;
+            container.appendChild(checkDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function performSkillCheck(type, dc, success_response, failure_response, description) {
+            // Remove the prompt
+            const prompt = document.getElementById('active-skill-check');
+            if (prompt) prompt.remove();
+
+            const res = await fetchFromServer('/resolve_skill_check', {
+                session_id: sessionId,
+                type: type,
+                dc: dc,
+                success_response: success_response,
+                failure_response: failure_response,
+                description: description
+            });
+
+            if (res) {
+                // Display Result
+                const color = res.success ? '#4caf50' : '#f44336';
+                const icon = res.success ? '✓' : '✕';
+                const resultMsg = `<div style="color:${color}; font-weight:bold; margin: 5px 0;">
+                    ${icon} Rolled ${res.roll} + ${res.stat_bonus} = ${res.total} (DC ${res.dc}) - ${res.success ? 'SUCCESS' : 'FAILURE'}
+                </div>`;
+                addMessage(resultMsg, 'system', document.getElementById('chat-container'));
+
+                // Display NPC Response
+                if (res.npc_response) {
+                    addMessage(res.npc_response, 'model', document.getElementById('chat-container'));
+                }
+            }
         }
 
         // --- Debug Inline Logic ---
@@ -479,41 +871,82 @@
 
         async function updateDebugPanel() {
             const contentDiv = document.getElementById('debug-inline-content');
-            if (contentDiv.style.display === 'none') return;
+            const contentDivInteraction = document.getElementById('debug-inline-content-interaction');
+
+            // Update both debug panels if they are visible
+            if (contentDiv.style.display === 'none' && contentDivInteraction.style.display === 'none') return;
 
             // Determine target NPC: current partner OR first nearby NPC OR last known
             let targetId = currentNpcId;
 
             // If no current partner, try to find one from the last update
             if (!targetId && window.lastNpcsInLocation && window.lastNpcsInLocation.length > 0) {
-                targetId = window.lastNpcsInLocation[0].name; // Assuming name is ID for now, or use ID if available
-                // Actually, npcs_in_location returns dicts with 'id' and 'name' usually? 
-                // Let's check backend. get_npcs_in_location returns list of dicts.
-                // We need to make sure we have the ID.
-                // In game_state_manager, get_npcs_in_location returns list of dicts with 'id', 'name', etc.
                 targetId = window.lastNpcsInLocation[0].id || window.lastNpcsInLocation[0].name;
             }
 
             if (targetId) {
-                contentDiv.textContent = "Loading debug info for " + targetId + "...";
+                if (contentDiv.style.display !== 'none') contentDiv.textContent = "Loading debug info for " + targetId + "...";
+                if (contentDivInteraction.style.display !== 'none') contentDivInteraction.textContent = "Loading debug info for " + targetId + "...";
                 try {
                     const res = await fetch(`http://localhost:8000/npc_debug/${sessionId}/${targetId}`);
                     if (res.ok) {
                         const data = await res.json();
-                        contentDiv.textContent = JSON.stringify(data, null, 2);
+                        const debugText = JSON.stringify(data, null, 2);
+                        if (contentDiv.style.display !== 'none') contentDiv.textContent = debugText;
+                        if (contentDivInteraction.style.display !== 'none') contentDivInteraction.textContent = debugText;
                     } else {
-                        contentDiv.textContent = "Error fetching debug info: " + res.status;
+                        const errorText = "Error fetching debug info: " + res.status;
+                        if (contentDiv.style.display !== 'none') contentDiv.textContent = errorText;
+                        if (contentDivInteraction.style.display !== 'none') contentDivInteraction.textContent = errorText;
                     }
                 } catch (e) {
-                    contentDiv.textContent = "Error: " + e.message;
+                    const errorText = "Error: " + e.message;
+                    if (contentDiv.style.display !== 'none') contentDiv.textContent = errorText;
+                    if (contentDivInteraction.style.display !== 'none') contentDivInteraction.textContent = errorText;
                 }
             } else {
-                contentDiv.textContent = "No NPC found in location to debug.";
+                const noNpcText = "No NPC selected or nearby.";
+                if (contentDiv.style.display !== 'none') contentDiv.textContent = noNpcText;
+                if (contentDivInteraction.style.display !== 'none') contentDivInteraction.textContent = noNpcText;
+            }
+        }
+
+        function testQuestUI() {
+            const dummyQuest = {
+                id: "test_quest",
+                description: "This is a test quest to verify the UI.",
+                giver_npc: "Debug System",
+                challenges: [
+                    {
+                        id: "test_challenge",
+                        type: "intelligence",
+                        dc: 10,
+                        description: "Verify that the quest offer UI renders correctly."
+                    }
+                ]
+            };
+            handleQuestOffer(dummyQuest);
+        }
+
+        async function clearDeadQuests() {
+            if (!confirm("Clear all completed and failed quests from the log?")) return;
+            try {
+                const res = await fetchFromServer('/debug/clear_quests', { session_id: sessionId });
+                if (res && res.status === 'success') {
+                    alert(`Cleared ${res.cleared_count} dead quests.`);
+                    await fetchGameState();
+                }
+            } catch (e) {
+                console.error("Error clearing quests:", e);
             }
         }
 
         function refreshDebugInfo() {
             updateDebugPanel();
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
     </script>

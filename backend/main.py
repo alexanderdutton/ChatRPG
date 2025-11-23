@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world
-from .gemini_service import get_gemini_response, generate_game_data, generate_npc_memory_update
+from .gemini_service import get_gemini_response, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output
 from .gemini_image_generator import generate_and_save_image
 
 # Add the project root to the sys.path
@@ -118,10 +118,13 @@ class NPCResponse(BaseModel):
     quest_log: List[str]
     map_display: Dict[str, Any]
     character_portrait: Optional[str] = None
-    game_mode: str
+    game_mode: str = "EXPLORATION"
+    metadata: Dict[str, Any] = {}
     conversation_partner_name: Optional[str] = None
     npcs_in_location: Optional[List[Dict]] = None
-    game_mode: str = "EXPLORATION"
+    player_stats: Optional[Dict[str, int]] = None
+    active_quests: Optional[List[Dict]] = None
+    skill_check: Optional[Dict[str, Any]] = None
 
 # --- API Endpoints ---
 
@@ -214,11 +217,21 @@ async def interact_with_npc(user_input: UserInput):
     if npc_memory:
         memory_context = f"Memories of {player_name}: {json.dumps(npc_memory)}"
 
+    # Inject Challenge System Prompt
+    player_stats = game_state_manager.get_player_stats(session_id)
+    challenge_prompt = CHALLENGE_SYSTEM_PROMPT.format(player_stats=json.dumps(player_stats))
+
+    # Inject Quest History (Active/Completed/Failed only)
+    quest_history = game_state_manager.get_quest_context_for_npc(session_id)
+    quest_context = f"Quest Log (Active & Completed): {json.dumps(quest_history)}"
+
     system_instruction = (f"You are {npc_info['name']}. "
                           f"You are talking to {player_name}. "
                           f"{location_context} "
                           f"{npc_info['personality_prompt']} "
-                          f"{memory_context}")
+                          f"{memory_context} "
+                          f"{quest_context} "
+                          f"{challenge_prompt}")
 
     conversation_history.append({"role": "user", "parts": [user_input.message]})
     logger.info(f"Conversation history after adding user message: {conversation_history}")
@@ -229,6 +242,23 @@ async def interact_with_npc(user_input: UserInput):
                                                             system_instruction=system_instruction)
     logger.info(f"Received Gemini dialogue: {gemini_dialogue}")
     logger.info(f"Received Gemini metadata: {metadata}")
+    
+    # Handle Quest Offer
+    if "quest_offered" in metadata:
+        quest_data = metadata["quest_offered"]
+        validation_errors = validate_quest_output(quest_data)
+        if not validation_errors:
+            logger.info(f"Valid quest offered: {quest_data['id']}")
+            game_state_manager.add_quest(session_id, quest_data)
+        else:
+            logger.error(f"Invalid quest offered: {validation_errors}")
+
+    # Handle Quest Resolution (Turn-In)
+    if "quest_resolved" in metadata:
+        quest_id = metadata["quest_resolved"]
+        logger.info(f"Quest resolved (turned in): {quest_id}")
+        game_state_manager.resolve_quest(session_id, quest_id)
+
     game_state_manager.process_metadata(session_id, metadata)
     conversation_history.append({"role": "model", "parts": [gemini_dialogue]})
     game_state_manager.update_conversation_history(session_id, conversation_history)
@@ -260,6 +290,7 @@ async def interact_with_npc(user_input: UserInput):
         current_location=game_state_manager.get_current_location_name(session_id),
         world_name=game_state_manager.get_world_name(),
         inventory=game_state_manager.get_inventory(session_id),
+        metadata=metadata,  # Pass metadata to frontend
         health=game_state_manager.get_health(session_id),
         gold=game_state_manager.get_gold(session_id),
         quest_log=game_state_manager.get_quest_log(session_id),
@@ -267,9 +298,147 @@ async def interact_with_npc(user_input: UserInput):
         character_portrait=portrait_url,
         game_mode=game_state_manager.get_game_mode(session_id),
         conversation_partner_name=npc_info.get("name", "Unknown") if npc_info else None,
-        npcs_in_location=game_state_manager.get_npcs_in_location(session_id)
+        npcs_in_location=game_state_manager.get_npcs_in_location(session_id),
+        player_stats=game_state_manager.get_player_stats(session_id),
+        active_quests=game_state_manager.get_active_quests(session_id),
+        skill_check=metadata.get("skill_check")
     )
 
+class ResolveChallengeInput(BaseModel):
+    session_id: str
+    challenge_id: str
+
+from fastapi import BackgroundTasks
+
+def update_history_background(session_id: str, result: Dict[str, Any]):
+    history = game_state_manager.get_conversation_history(session_id)
+    system_note = f"[System] Player resolved challenge '{result.get('description', 'Unknown')}' with result: {'Success' if result.get('success') else 'Failure'}."
+    history.append({"role": "user", "parts": [system_note]})
+    game_state_manager.update_conversation_history(session_id, history)
+
+@app.post("/resolve_challenge")
+async def resolve_challenge_endpoint(input: ResolveChallengeInput, background_tasks: BackgroundTasks):
+    logger.info(f"Resolving challenge: {input.challenge_id} for session {input.session_id}")
+    result = game_state_manager.resolve_challenge(input.session_id, input.challenge_id)
+    
+    # Update conversation history in background
+    background_tasks.add_task(update_history_background, input.session_id, result)
+    
+    return result
+
+class SkillCheckInput(BaseModel):
+    session_id: str
+    type: str
+    dc: int
+    success_response: str
+    failure_response: str
+    description: str
+
+@app.post("/resolve_skill_check")
+async def resolve_skill_check_endpoint(input: SkillCheckInput):
+    logger.info(f"Resolving skill check: {input.description} (DC {input.dc} {input.type})")
+    
+    # Get Stats
+    stats = game_state_manager.get_player_stats(input.session_id)
+    stat_bonus = stats.get(input.type.lower(), 0)
+    
+    import random
+    roll = random.randint(1, 20)
+    total = roll + stat_bonus
+    success = total >= input.dc
+    
+    response_text = input.success_response if success else input.failure_response
+    
+    result = {
+        "success": success,
+        "roll": roll,
+        "stat_bonus": stat_bonus,
+        "total": total,
+        "dc": input.dc,
+        "npc_response": response_text,
+        "critical_success": roll == 20,
+        "critical_failure": roll == 1
+    }
+    
+    # Update History
+    history = game_state_manager.get_conversation_history(input.session_id)
+    
+    # Add system note about the roll (so LLM knows what happened next time)
+    system_note = f"[System] Player rolled {roll} + {stat_bonus} = {total} vs DC {input.dc} on {input.description}. Result: {'Success' if success else 'Failure'}."
+    history.append({"role": "user", "parts": [system_note]})
+    
+    # Add NPC response
+    history.append({"role": "model", "parts": [response_text]})
+    
+    game_state_manager.update_conversation_history(input.session_id, history)
+    
+    return result
+
+class StateInput(BaseModel):
+    session_id: str
+
+@app.post("/state", response_model=NPCResponse)
+async def get_game_state(input: StateInput):
+    session_id = input.session_id
+    if not game_state_manager.session_exists(session_id):
+        raise HTTPException(status_code=404, detail="Session not found.")
+    
+    npc_id = game_state_manager.get_conversation_partner(session_id)
+    npc_info = game_state_manager.get_npc_info(npc_id) if npc_id else None
+    
+    portrait_url = None
+    if npc_id:
+        portrait_path = f"frontend/portraits/{npc_id}.png"
+        if os.path.exists(portrait_path):
+            portrait_url = f"/portraits/{npc_id}.png"
+
+    return NPCResponse(
+        session_id=session_id,
+        dialogue="", # No dialogue for state update
+        player_name=game_state_manager.get_player_name(session_id),
+        current_location=game_state_manager.get_current_location_name(session_id),
+        world_name=game_state_manager.get_world_name(),
+        inventory=game_state_manager.get_inventory(session_id),
+        health=game_state_manager.get_health(session_id),
+        gold=game_state_manager.get_gold(session_id),
+        quest_log=game_state_manager.get_quest_log(session_id),
+        map_display=game_state_manager.get_map_display(session_id),
+        npcs_in_location=game_state_manager.get_npcs_in_location(session_id),
+        game_mode=game_state_manager.get_game_mode(session_id),
+        character_portrait=portrait_url,
+        conversation_partner_name=npc_info.get("name", "Unknown") if npc_info else None,
+        player_stats=game_state_manager.get_player_stats(session_id),
+        active_quests=game_state_manager.get_active_quests(session_id)
+    )
+
+
+class QuestDecisionInput(BaseModel):
+    session_id: str
+    quest_id: str
+
+@app.post("/accept_quest")
+async def accept_quest_endpoint(input: QuestDecisionInput):
+    logger.info(f"Accepting quest: {input.quest_id} for session {input.session_id}")
+    response_text = game_state_manager.accept_quest(input.session_id, input.quest_id)
+    
+    # Update conversation history so NPC remembers saying this
+    history = game_state_manager.get_conversation_history(input.session_id)
+    history.append({"role": "model", "parts": [response_text]})
+    game_state_manager.update_conversation_history(input.session_id, history)
+    
+    return {"status": "success", "message": "Quest accepted", "npc_response": response_text}
+
+@app.post("/refuse_quest")
+async def refuse_quest_endpoint(input: QuestDecisionInput):
+    logger.info(f"Refusing quest: {input.quest_id} for session {input.session_id}")
+    response_text = game_state_manager.refuse_quest(input.session_id, input.quest_id)
+    
+    # Update conversation history so NPC remembers saying this
+    history = game_state_manager.get_conversation_history(input.session_id)
+    history.append({"role": "model", "parts": [response_text]})
+    game_state_manager.update_conversation_history(input.session_id, history)
+    
+    return {"status": "success", "message": "Quest refused", "npc_response": response_text}
 
 
 
@@ -314,13 +483,19 @@ async def handle_command(command_input: CommandInput):
             import random
             greeting = random.choice(greetings)
             
+            # Handle dictionary greetings (action/dialogue)
+            if isinstance(greeting, dict):
+                greeting_text = f"*{greeting.get('action', '')}* {greeting.get('dialogue', '')}"
+            else:
+                greeting_text = str(greeting)
+            
             # Add to history so it's consistent
             conversation_history = game_state_manager.get_conversation_history(session_id)
-            conversation_history.append({"role": "model", "parts": [greeting]})
+            conversation_history.append({"role": "model", "parts": [greeting_text]})
             game_state_manager.update_conversation_history(session_id, conversation_history)
             
             # Override response text with the greeting
-            command_response_text = greeting
+            command_response_text = greeting_text
 
             # Portrait Logic: Trigger generation if missing
             portrait_path = f"frontend/portraits/{npc_id}.png"
@@ -432,8 +607,15 @@ async def handle_command(command_input: CommandInput):
         map_display=game_state_manager.get_map_display(session_id),
         npcs_in_location=npcs_in_location,
         game_mode=game_state_manager.get_game_mode(session_id),
-        character_portrait=portrait_url
+        character_portrait=portrait_url,
+        active_quests=game_state_manager.get_active_quests(session_id)
     )
+
+@app.post("/debug/clear_quests")
+async def clear_dead_quests_endpoint(input: StateInput):
+    logger.info(f"Clearing dead quests for session {input.session_id}")
+    count = game_state_manager.clear_dead_quests(input.session_id)
+    return {"status": "success", "cleared_count": count}
 
 
 class StartGameInput(BaseModel):
@@ -483,7 +665,8 @@ async def start_game(start_input: StartGameInput):
         gold=game_state_manager.get_gold(session_id),
         quest_log=game_state_manager.get_quest_log(session_id),
         map_display=game_state_manager.get_map_display(session_id),
-        npcs_in_location=npcs_in_location
+        npcs_in_location=npcs_in_location,
+        active_quests=game_state_manager.get_active_quests(session_id)
     )
 
 @app.get("/npc_portrait/{npc_id}")
