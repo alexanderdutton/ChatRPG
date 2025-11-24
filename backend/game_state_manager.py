@@ -122,13 +122,13 @@ class GameStateManager:
             return {
                 "requires_roll": False,
                 "outcome": "auto_success",
-                "narrative": "trivial"
+                "narrative": "Trivial task."
             }
         elif margin <= -10:
             return {
                 "requires_roll": False,
                 "outcome": "auto_failure",
-                "narrative": "impossible"
+                "narrative": "Beyond your ability."
             }
         else:
             return {
@@ -326,7 +326,11 @@ class GameStateManager:
 
         # Add descriptions of notable features in adjacent squares
         adjacent_features_list = []
-        directions = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
+        structured_adjacent_features = []
+        directions = {
+            "North": (0, -1), "South": (0, 1), "East": (1, 0), "West": (-1, 0),
+            "North-East": (1, -1), "North-West": (-1, -1), "South-East": (1, 1), "South-West": (-1, 1)
+        }
         for direction, (dx, dy) in directions.items():
             adj_x, adj_y = player_x + dx, player_y + dy
             if 0 <= adj_y < len(location.raw_layout) and 0 <= adj_x < len(location.raw_layout[0]):
@@ -334,9 +338,12 @@ class GameStateManager:
                 for feature in location.features:
                     if feature.name == location.map_key.get(adj_cell_char):
                         adjacent_features_list.append(f"To the {direction} there is {feature.name}.")
+                        structured_adjacent_features.append({"name": feature.name, "direction": direction})
                         break
         if adjacent_features_list:
             description_parts["adjacent_features_description"] = " ".join(adjacent_features_list)
+        
+        description_parts["adjacent_features"] = structured_adjacent_features
 
         # Add NPC descriptions
         npcs_in_location = self.get_npcs_in_location(session_id)
@@ -947,7 +954,19 @@ class GameStateManager:
         
         for quest in quests:
             cursor.execute("SELECT * FROM challenges WHERE quest_id = ?", (quest['id'],))
-            quest['challenges'] = [dict(row) for row in cursor.fetchall()]
+            challenges = [dict(row) for row in cursor.fetchall()]
+            
+            # Inject auto-resolution status for context
+            if quest['status'] == 'active':
+                player_stats = self.get_player_stats(session_id)
+                for ch in challenges:
+                    if not ch['completed']:
+                        stat_key = ch['type'].lower()
+                        player_stat = player_stats.get(stat_key, 10)
+                        resolution = self.should_require_roll(ch['dc'], player_stat)
+                        ch.update(resolution)
+                        
+            quest['challenges'] = challenges
             quest['involved_entities'] = json.loads(quest['involved_entities']) if quest['involved_entities'] else []
             
         conn.close()

@@ -93,54 +93,52 @@
                                 <!-- Exploration Context -->
                                 <div id="exploration-context">
                                     <div class="stat-card" style="border:none; background:none; padding:0;">
-                                        <h3 style="margin-top:0;">Nearby</h3>
-                                        <div id="local-list" style="display: flex; flex-direction: column; gap: 10px;">
-                                            <div style="color: #888; font-style: italic;">No one nearby.</div>
+                                        <div id="local-list"
+                                            style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 15px;">
+                                            <div style="color: #888; font-style: italic; font-size: 0.8em;">No one here.
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
 
-                                <!-- Interaction Context -->
-                                <div id="interaction-context" class="hidden">
-                                    <div class="stat-card" style="border:none; background:none; padding:0;">
-                                        <h3 style="margin-top:0;">Interaction</h3>
-                                        <div id="npc-details">
-                                            <h3 id="npc-name-display"
-                                                style="color: var(--accent-color); margin:0; border:none;">Unknown</h3>
-                                            <p id="npc-desc-display"
-                                                style="font-size: 0.9rem; color: #ccc; margin-top: 5px;">...</p>
-                                        </div>
+                                    <h3
+                                        style="margin-top:0; color: var(--accent-color); font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px;">
+                                        Nearby</h3>
+                                    <div id="nearby-list" style="display: flex; flex-direction: column; gap: 5px;">
+                                        <div style="color: #888; font-style: italic; font-size: 0.8em;">Nothing
+                                            nearby.</div>
                                     </div>
                                 </div>
                             </div>
+
+
                         </div>
                     </div>
-
-                    <!-- 4. Debug -->
-                    <div class="accordion-item">
-                        <button class="accordion-header" onclick="toggleAccordion('acc-debug')">Debug</button>
-                        <div id="acc-debug" class="accordion-content">
-                            <div style="padding: 15px;">
-                                <div id="debug-panel-container">
-                                    <button id="debug-btn" class="btn"
-                                        style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
-                                        onclick="toggleDebugInline()">Refresh Debug Info</button>
-                                    <button class="btn"
-                                        style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
-                                        onclick="testQuestUI()">Test Quest UI</button>
-                                    <button class="btn btn-danger"
-                                        style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
-                                        onclick="clearDeadQuests()">Clear Dead Quests</button>
-                                    <div id="debug-inline-content"
-                                        style="display: none; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8em; color: #aaddff; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
-                                        Select an NPC to view debug info.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                 </div>
+
+                <!-- 4. Debug -->
+                <div class="accordion-item">
+                    <button class="accordion-header" onclick="toggleAccordion('acc-debug')">Debug</button>
+                    <div id="acc-debug" class="accordion-content">
+                        <div style="padding: 15px;">
+                            <div id="debug-panel-container">
+                                <button id="debug-btn" class="btn"
+                                    style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                    onclick="toggleDebugInline()">Refresh Debug Info</button>
+                                <button class="btn"
+                                    style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                    onclick="testQuestUI()">Test Quest UI</button>
+                                <button class="btn btn-danger"
+                                    style="width: 100%; opacity: 0.7; font-size: 0.8em; margin-bottom: 5px;"
+                                    onclick="clearDeadQuests()">Clear Dead Quests</button>
+                                <div id="debug-inline-content"
+                                    style="display: none; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.8em; color: #aaddff; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">
+                                    Select an NPC to view debug info.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <!-- BOTTOM LEFT: LOG (Chat/History) -->
@@ -399,8 +397,7 @@
                                            <div style="font-size: 0.8em; color: #aaddff; font-style: italic; margin-top: 2px;">${ch.auto_narrative || "Trivial task."}</div>`;
                             } else if (ch.auto_result === 'auto_failure') {
                                 // Auto-Failure: Show Impossible Label
-                                rollBtn = `<span style="font-size:0.7em; padding:2px 5px; margin-left:5px; color: #f44336; border: 1px solid #f44336; border-radius: 3px;">Impossible</span>
-                                           <div style="font-size: 0.8em; color: #f44336; font-style: italic; margin-top: 2px;">${ch.auto_narrative || "Beyond your ability."}</div>`;
+                                rollBtn = `<span style="font-size:0.7em; padding:2px 5px; margin-left:5px; color: #f44336; border: 1px solid #f44336; border-radius: 3px;">Impossible</span>`;
                             } else {
                                 // Normal Roll
                                 if (currentGameMode === "EXPLORATION") {
@@ -444,7 +441,15 @@
                                 <div style="font-weight:bold; color:var(--accent-color); margin-bottom:5px;">Quest Offered: ${quest.description}</div>
                 <div style="font-size:0.9em; margin-bottom:10px;">
                     <div><strong>Giver:</strong> ${quest.giver_npc}</div>
-                    <div><strong>Challenge:</strong> ${quest.challenges[0].description} (DC ${quest.challenges[0].dc} ${quest.challenges[0].type})</div>
+                    <div>
+                        <strong>Challenge:</strong> ${quest.challenges[0].description} 
+                        (DC ${quest.challenges[0].dc} ${quest.challenges[0].type})
+                        ${quest.challenges[0].auto_result === 'auto_failure' ?
+                    '<span style="font-size:0.7em; padding:2px 5px; margin-left:5px; color: #f44336; border: 1px solid #f44336; border-radius: 3px;">Impossible</span>' :
+                    (quest.challenges[0].auto_result === 'auto_success' ?
+                        '<span style="font-size:0.7em; padding:2px 5px; margin-left:5px; color: #4caf50; border: 1px solid #4caf50; border-radius: 3px;">Trivial</span>' : '')
+                }
+                    </div>
                 </div>
                 <div style="display:flex; gap:10px;">
                     <button class="btn" onclick="acceptQuest('${quest.id}', this)">Accept</button>
@@ -567,7 +572,6 @@
             const explContent = document.getElementById('exploration-view-content');
             const intContent = document.getElementById('interaction-view-content');
             const explContext = document.getElementById('exploration-context');
-            const intContext = document.getElementById('interaction-context');
 
             const navControls = document.getElementById('nav-controls');
             const explActions = document.getElementById('expl-actions');
@@ -581,7 +585,6 @@
                 explContent.classList.remove('hidden');
                 intContent.classList.add('hidden');
                 explContext.classList.remove('hidden');
-                intContext.classList.add('hidden');
 
                 // Controls: Enable Nav
                 navButtons.forEach(btn => {
@@ -605,7 +608,6 @@
                 explContent.classList.add('hidden');
                 intContent.classList.remove('hidden');
                 explContext.classList.add('hidden');
-                intContext.classList.remove('hidden');
 
                 // Controls: Disable Nav (don't hide)
                 navButtons.forEach(btn => {
@@ -637,39 +639,84 @@
             renderMap(data.map_display);
 
             // Local List
+            // Local List (Same Tile)
             const localList = document.getElementById('local-list');
             localList.innerHTML = '';
+
+            // Nearby List (Adjacent Tiles)
+            const nearbyList = document.getElementById('nearby-list');
+            nearbyList.innerHTML = '';
+
             if (data.npcs_in_location && data.npcs_in_location.length > 0) {
+                let localCount = 0;
+                let nearbyCount = 0;
+
                 data.npcs_in_location.forEach(npc => {
-                    const card = document.createElement('div');
-                    card.className = 'stat-card';
-                    card.style.cursor = 'pointer';
-                    card.style.transition = 'background 0.2s';
-
-                    let locationText = "";
                     if (npc.distance === 0) {
-                        locationText = "<span style='color:#4caf50'>Here</span>";
-                    } else {
-                        locationText = `<span style='color:#888'>${npc.distance} steps away</span>`;
-                    }
+                        // LOCAL (Same Tile)
+                        localCount++;
+                        const card = document.createElement('div');
+                        card.style.display = 'flex';
+                        card.style.alignItems = 'center';
+                        card.style.gap = '10px';
+                        card.style.padding = '5px';
+                        card.style.background = 'rgba(255, 255, 255, 0.05)';
+                        card.style.borderRadius = '4px';
 
-                    card.innerHTML = `
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <h3 style="margin: 0; color: var(--accent-color); border:none;">${npc.name}</h3>
-                            <small>${locationText}</small>
-                        </div>
-                        <p style="font-size: 0.85rem; color: #ccc; margin-top:5px;">${npc.short_description}</p>
-                        <div style="margin-top: 10px;">
-                            <button class="btn" style="font-size: 0.8rem; padding: 5px 10px; width:100%;" 
+                        card.innerHTML = `
+                            <button class="btn" style="font-size: 0.7rem; padding: 2px 8px; flex-shrink: 0;" 
                                 onclick="sendCommand('talk to ${npc.name}')">Talk</button>
-                        </div>
-                    `;
-                    card.onmouseover = () => card.style.background = 'rgba(255, 255, 255, 0.1)';
-                    card.onmouseout = () => card.style.background = 'rgba(255, 255, 255, 0.05)';
-                    localList.appendChild(card);
+                            <div style="flex-grow: 1;">
+                                <div style="color: var(--accent-color); font-weight: bold; font-size: 0.9em;">${npc.name}</div>
+                                <div style="font-size: 0.75em; color: #ccc;">${npc.short_description}</div>
+                            </div>
+                        `;
+                        localList.appendChild(card);
+                    } else if (npc.distance === 1) {
+                        // NEARBY (Adjacent)
+                        nearbyCount++;
+
+                        // Calculate Direction
+                        let direction = "Nearby";
+                        const dx = npc.x - data.player_x;
+                        const dy = npc.y - data.player_y;
+
+                        if (dx === 0 && dy === -1) direction = "North";
+                        else if (dx === 0 && dy === 1) direction = "South";
+                        else if (dx === 1 && dy === 0) direction = "East";
+                        else if (dx === -1 && dy === 0) direction = "West";
+                        else if (dx === 1 && dy === -1) direction = "North-East";
+                        else if (dx === -1 && dy === -1) direction = "North-West";
+                        else if (dx === 1 && dy === 1) direction = "South-East";
+                        else if (dx === -1 && dy === 1) direction = "South-West";
+
+                        const item = document.createElement('div');
+                        item.style.fontSize = '0.85em';
+                        item.style.color = '#ccc';
+                        item.style.padding = '2px 5px';
+                        item.innerHTML = `<span style="color: var(--accent-color); font-weight: bold;">${npc.name}</span> <span style="color: #888;">(${direction})</span>`;
+                        nearbyList.appendChild(item);
+                    }
+                });
+
+                if (localCount === 0) localList.innerHTML = '<div style="color: #888; font-style: italic; font-size: 0.8em;">No one here.</div>';
+
+            } else {
+                localList.innerHTML = '<div style="color: #888; font-style: italic; font-size: 0.8em;">No one here.</div>';
+            }
+
+            // Render Adjacent Features in Nearby List
+            if (data.adjacent_features && data.adjacent_features.length > 0) {
+                data.adjacent_features.forEach(feat => {
+                    const item = document.createElement('div');
+                    item.style.fontSize = '0.85em';
+                    item.style.color = '#ccc';
+                    item.style.padding = '2px 5px';
+                    item.innerHTML = `<span style="color: var(--accent-color); font-weight: bold;">${feat.name}</span> <span style="color: #888;">(${feat.direction})</span>`;
+                    nearbyList.appendChild(item);
                 });
             } else {
-                localList.innerHTML = '<div style="color: #888; font-style: italic;">No one nearby.</div>';
+                nearbyList.innerHTML = '<div style="color: #888; font-style: italic; font-size: 0.8em;">Nothing nearby.</div>';
             }
 
             // Chat Log (System messages)
@@ -693,15 +740,19 @@
             }
 
             // NPC Name in Context
-            if (data.conversation_partner_name) {
-                document.getElementById('npc-name-display').textContent = data.conversation_partner_name;
-                // We could also update description if available, but name is most important.
-                document.getElementById('npc-desc-display').textContent = "In conversation...";
+            // NPC Name in Context (Removed in UI Refinement Phase 2)
+            // if (data.conversation_partner_name) {
+            //     document.getElementById('npc-name-display').textContent = data.conversation_partner_name;
+            //     document.getElementById('npc-desc-display').textContent = "In conversation...";
+            //     currentNpcId = data.conversation_partner_name;
+            // } else {
+            //     document.getElementById('npc-name-display').textContent = "Unknown";
+            //     currentNpcId = null;
+            // }
 
-                // Update current NPC ID for debug
+            if (data.conversation_partner_name) {
                 currentNpcId = data.conversation_partner_name;
             } else {
-                document.getElementById('npc-name-display').textContent = "Unknown";
                 currentNpcId = null;
             }
 

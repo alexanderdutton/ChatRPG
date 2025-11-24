@@ -265,6 +265,15 @@ async def interact_with_npc(user_input: UserInput):
         validation_errors = validate_quest_output(quest_data)
         if not validation_errors:
             logger.info(f"Valid quest offered: {quest_data['id']}")
+            
+            # Inject difficulty info for frontend display
+            player_stats = game_state_manager.get_player_stats(session_id)
+            for ch in quest_data.get('challenges', []):
+                stat_key = ch['type'].lower()
+                player_stat = player_stats.get(stat_key, 10)
+                resolution = game_state_manager.should_require_roll(ch['dc'], player_stat)
+                ch.update(resolution)
+            
             game_state_manager.add_quest(session_id, quest_data)
         else:
             logger.error(f"Invalid quest offered: {validation_errors}")

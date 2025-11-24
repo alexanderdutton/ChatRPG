@@ -286,7 +286,9 @@ CRITICAL FAILURE (Natural 1):
 - Negative outcome: Things get worse
 - Example: "You snapped the beam! Now I need two!"
 - Relationship impact: -15
-- May spawn follow-up consequence
+- May spawn follow-up consequence (MUST BE LOWER DC or DIFFERENT STAT)
+- IF player failed a high DC check, DO NOT offer another high DC check immediately.
+- Offer a "redemption" task that is easier but less rewarding, or uses a different approach.
 
 NEVER respond with:
 - "Try again"
