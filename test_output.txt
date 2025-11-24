@@ -1,14 +1,59 @@
-test_entity_stub_creation (backend.tests.test_challenge_system.TestChallengeSystem.test_entity_stub_creation) ... C:\Projects\_GeminiAssist\ChatRPG\backend\game_world.py:60: PydanticDeprecatedSince20: The `parse_obj` method is deprecated; use `model_validate` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+C:\Projects\_GeminiAssist\ChatRPG\backend\game_world.py:67: PydanticDeprecatedSince20: The `parse_obj` method is deprecated; use `model_validate` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
   game_data = GameWorldData.parse_obj(game_data_dict)
-ok
-test_resolve_challenge (backend.tests.test_challenge_system.TestChallengeSystem.test_resolve_challenge) ... ok
-test_validate_quest_output (backend.tests.test_challenge_system.TestChallengeSystem.test_validate_quest_output) ... ok
+EEEE
+======================================================================
+ERROR: test_auto_resolution (__main__.TestGameBalance.test_auto_resolution)
+Test Auto-Success and Auto-Failure logic.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
+    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
+  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
+    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
+sqlite3.OperationalError: no such column: player_stats
+
+======================================================================
+ERROR: test_failure_severity (__main__.TestGameBalance.test_failure_severity)
+Test Failure Severity Calculation.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
+    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
+  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
+    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
+sqlite3.OperationalError: no such column: player_stats
+
+======================================================================
+ERROR: test_quest_spam_prevention (__main__.TestGameBalance.test_quest_spam_prevention)
+Test Quest Cooldowns.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
+    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
+  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
+    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
+sqlite3.OperationalError: no such column: player_stats
+
+======================================================================
+ERROR: test_relationship_updates (__main__.TestGameBalance.test_relationship_updates)
+Test Relationship Modifiers.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
+    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
+  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
+    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
+sqlite3.OperationalError: no such column: player_stats
 
 ----------------------------------------------------------------------
-Ran 3 tests in 0.148s
+Ran 4 tests in 0.170s
 
-OK
+FAILED (errors=4)
 GameStateManager initialized with SQLite.
-Session test_session_challenge created with initial NPC states.
+Session test_session_balance created with initial NPC states.
 GameStateManager initialized with SQLite.
+Session test_session_balance created with initial NPC states.
 GameStateManager initialized with SQLite.
+Session test_session_balance created with initial NPC states.
+GameStateManager initialized with SQLite.
+Session test_session_balance created with initial NPC states.

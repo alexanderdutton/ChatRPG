@@ -10,6 +10,26 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "game_data.db")
 
+DEFAULT_NPC_STATE = {
+    "mood": "content",
+    "relationship": 50,
+    "quests_given_recently": 0,
+    "last_quest_given": 0,
+    "quest_cooldown_expires": 0
+}
+
+RELATIONSHIP_MODIFIERS = {
+    "quest_accepted": 2,
+    "auto_success": 5,
+    "roll_success": 8,
+    "minor_failure": -2,
+    "major_failure": -5,
+    "severe_failure": -10,
+    "critical_failure": -15,
+    "quest_refused": -3,
+    "quest_abandoned": -8
+}
+
 class GameStateManager:
 
     def __init__(self):
@@ -152,19 +172,28 @@ class GameStateManager:
         else:
             return "severe"    # Catastrophic (missed by 9+)
 
-    def update_relationship(self, session_id: str, npc_name: str, change_amount: int):
-        """Updates the relationship score with an NPC."""
+    def update_relationship(self, session_id: str, npc_name: str, change_amount: int | str):
+        """
+        Updates the relationship score with an NPC.
+        change_amount can be an integer or an event string (e.g., 'quest_accepted').
+        """
         npc_state = self.get_npc_state(session_id, npc_name)
-        if not npc_state:
-            # Initialize if missing
-            npc_state = {"relationship": 50, "mood": "content", "quests_given_recently": 0}
+        
+        modifier = 0
+        if isinstance(change_amount, str):
+            modifier = RELATIONSHIP_MODIFIERS.get(change_amount, 0)
+        else:
+            modifier = change_amount
 
         current_relationship = npc_state.get("relationship", 50)
-        new_relationship = max(0, min(100, current_relationship + change_amount))
+        new_relationship = max(0, min(100, current_relationship + modifier))
         
         npc_state["relationship"] = new_relationship
+        
+        # TODO: Implement mood changes based on quest outcomes and relationship
+        
         self.update_npc_state(session_id, npc_name, npc_state)
-        logger.info(f"Updated relationship with {npc_name}: {current_relationship} -> {new_relationship}")
+        logger.info(f"Updated relationship with {npc_name}: {current_relationship} -> {new_relationship} (Modifier: {modifier})")
 
     def _get_session_data(self, session_id: str) -> Dict[str, Any] | None:
         """Helper to retrieve full session data."""
@@ -591,12 +620,48 @@ class GameStateManager:
         return character.dict() if character else None
 
     def get_npc_state(self, session_id: str, npc_name: str) -> Dict[str, Any]:
-        """Retrieves the state of a specific NPC."""
+        """Retrieves the state of a specific NPC, initializing defaults if needed."""
         data = self._get_session_data(session_id)
         if not data:
-            return {}
+            return DEFAULT_NPC_STATE.copy()
+            
         npc_states = data.get("npc_states", {})
-        return npc_states.get(npc_name, {})
+        state = npc_states.get(npc_name, {})
+        
+        # Merge with defaults
+        full_state = DEFAULT_NPC_STATE.copy()
+        full_state.update(state)
+        
+        # Decay quest counter
+        self.decay_quest_counter(full_state)
+        
+        # If state changed (decay happened), update DB? 
+        # Ideally yes, but for read-heavy ops maybe not every time. 
+        # Let's update if decay happened.
+        if full_state["quests_given_recently"] != state.get("quests_given_recently", 0):
+             npc_states[npc_name] = full_state
+             self._update_session_field(session_id, "npc_states", npc_states)
+             
+        return full_state
+
+    def decay_quest_counter(self, npc_state: Dict[str, Any]):
+        """Decays the quest spam counter over time."""
+        import time
+        if npc_state["quests_given_recently"] > 0:
+            time_since = time.time() - npc_state.get("last_quest_given", 0)
+            if time_since > 3600: # 1 hour
+                decay_amount = int(time_since // 3600)
+                npc_state["quests_given_recently"] = max(0, npc_state["quests_given_recently"] - decay_amount)
+
+    def record_quest_given(self, session_id: str, npc_name: str):
+        """Updates NPC state when a quest is given."""
+        import time
+        npc_state = self.get_npc_state(session_id, npc_name)
+        npc_state["quests_given_recently"] += 1
+        npc_state["last_quest_given"] = time.time()
+        npc_state["quest_cooldown_expires"] = time.time() + 300 # 5 min cooldown? User didn't specify duration, assuming 5m
+        
+        self.update_npc_state(session_id, npc_name, npc_state)
 
     def update_npc_state(self, session_id: str, npc_name: str, updates: Dict[str, Any]):
         """Updates the state of a specific NPC."""
@@ -881,6 +946,12 @@ class GameStateManager:
         cursor.execute("UPDATE quests SET status = 'active' WHERE id = ? AND session_id = ?", (quest_id, session_id))
         conn.commit()
         conn.close()
+        
+        # Update Relationship
+        giver = self.get_quest_giver(session_id, quest_id)
+        if giver:
+            self.update_relationship(session_id, giver, "quest_accepted")
+            
         return response_text
 
     def refuse_quest(self, session_id: str, quest_id: str) -> str:
@@ -897,6 +968,12 @@ class GameStateManager:
         cursor.execute("UPDATE quests SET status = 'refused' WHERE id = ? AND session_id = ?", (quest_id, session_id))
         conn.commit()
         conn.close()
+        
+        # Update Relationship
+        giver = self.get_quest_giver(session_id, quest_id)
+        if giver:
+            self.update_relationship(session_id, giver, "quest_refused")
+            
         return response_text
         
         # Process involved entities
@@ -1038,7 +1115,7 @@ class GameStateManager:
             }
             # Relationship Update for Auto-Success
             if success:
-                self.update_relationship(session_id, self.get_quest_giver(session_id, challenge['quest_id']), 5)
+                self.update_relationship(session_id, self.get_quest_giver(session_id, challenge['quest_id']), "auto_success")
         else:
             import random
             roll = random.randint(1, 20)
@@ -1058,15 +1135,12 @@ class GameStateManager:
             # Relationship Update based on Outcome
             giver_name = self.get_quest_giver(session_id, challenge['quest_id'])
             if giver_name:
-                rel_change = {
-                    "success": 8,
-                    "minor": -2,
-                    "major": -5,
-                    "severe": -10,
-                    "critical": -15
-                }.get(severity, 0)
-                if success and roll == 20: rel_change += 5 # Crit success bonus
-                self.update_relationship(session_id, giver_name, rel_change)
+                if success:
+                    self.update_relationship(session_id, giver_name, "roll_success")
+                else:
+                    # severity maps directly to modifier keys: minor -> minor_failure, etc.
+                    modifier_key = f"{severity}_failure"
+                    self.update_relationship(session_id, giver_name, modifier_key)
 
             result = {
                 "success": success,
