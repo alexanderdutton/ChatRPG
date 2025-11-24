@@ -112,6 +112,60 @@ class GameStateManager:
         conn.commit()
         conn.close()
 
+    def should_require_roll(self, challenge_dc: int, player_stat: int) -> Dict[str, Any]:
+        """
+        Determines if a roll is needed or if auto-success/failure applies.
+        """
+        margin = player_stat - challenge_dc
+        
+        if margin >= 5:
+            return {
+                "requires_roll": False,
+                "outcome": "auto_success",
+                "narrative": "trivial"
+            }
+        elif margin <= -10:
+            return {
+                "requires_roll": False,
+                "outcome": "auto_failure",
+                "narrative": "impossible"
+            }
+        else:
+            return {
+                "requires_roll": True,
+                "outcome": "uncertain"
+            }
+
+    def calculate_failure_severity(self, roll_total: int, dc: int, is_crit_fail: bool = False) -> str:
+        """
+        Determines how badly the player failed.
+        """
+        if is_crit_fail:
+            return "critical"
+            
+        margin = roll_total - dc
+        
+        if margin >= -3:
+            return "minor"     # Close call (missed by 1-3)
+        elif margin >= -8:
+            return "major"     # Clear failure (missed by 4-8)
+        else:
+            return "severe"    # Catastrophic (missed by 9+)
+
+    def update_relationship(self, session_id: str, npc_name: str, change_amount: int):
+        """Updates the relationship score with an NPC."""
+        npc_state = self.get_npc_state(session_id, npc_name)
+        if not npc_state:
+            # Initialize if missing
+            npc_state = {"relationship": 50, "mood": "content", "quests_given_recently": 0}
+
+        current_relationship = npc_state.get("relationship", 50)
+        new_relationship = max(0, min(100, current_relationship + change_amount))
+        
+        npc_state["relationship"] = new_relationship
+        self.update_npc_state(session_id, npc_name, npc_state)
+        logger.info(f"Updated relationship with {npc_name}: {current_relationship} -> {new_relationship}")
+
     def _get_session_data(self, session_id: str) -> Dict[str, Any] | None:
         """Helper to retrieve full session data."""
         conn = sqlite3.connect(DB_PATH)
@@ -289,8 +343,8 @@ class GameStateManager:
         if npcs_in_location:
             npc_descriptions = []
             for npc in npcs_in_location:
-                npc_state = session["npc_states"][npc["id"]]
-                if npc_state["x"] == player_x and npc_state["y"] == player_y:
+                # Use coordinates directly from get_npcs_in_location result
+                if npc["x"] == player_x and npc["y"] == player_y:
                     npc_descriptions.append(f"{npc['name']}: {npc['short_description']}")
             if npc_descriptions:
                 description_parts["npcs_description"] = f"You see:\n- {', '.join(npc_descriptions)}"
@@ -556,7 +610,50 @@ class GameStateManager:
         # In a full implementation, we might append it to a 'long_term_history' field.
         self._update_session_field(session_id, "conversation_history", [])
 
+    def sync_world_npcs(self, session_id: str):
+        """Syncs NPCs from game_world to the session if they are missing."""
+        session = self._get_session_data(session_id)
+        if not session:
+            return
+
+        npc_states = session.get("npc_states", {})
+        current_location_name = session.get("current_location_name")
+        location = game_world.get_location(current_location_name)
+        
+        if not location:
+            logger.warning(f"sync_world_npcs: Location '{current_location_name}' not found in game_world!")
+            return
+
+        logger.info(f"sync_world_npcs: Checking location '{current_location_name}'. NPCs in world: {[c.name for c in location.characters]}")
+
+        updates_needed = False
+        for char in location.characters:
+            if char.name not in npc_states:
+                # Add missing NPC to session state
+                npc_states[char.name] = {
+                    "location": current_location_name,
+                    "x": char.x,
+                    "y": char.y,
+                    "relationship": 50,
+                    "mood": "content"
+                }
+                updates_needed = True
+                logger.info(f"Synced missing NPC {char.name} to session {session_id}")
+            elif char.name == "The Architect":
+                # Force update debug NPC position
+                if npc_states[char.name]["x"] != char.x or npc_states[char.name]["y"] != char.y:
+                    npc_states[char.name]["x"] = char.x
+                    npc_states[char.name]["y"] = char.y
+                    updates_needed = True
+                    logger.info(f"Force updated The Architect position to {char.x},{char.y}")
+        
+        if updates_needed:
+            self._update_session_field(session_id, "npc_states", npc_states)
+
     def get_npcs_in_location(self, session_id: str) -> List[Dict]:
+        # Sync NPCs first
+        self.sync_world_npcs(session_id)
+        
         session = self._get_session_data(session_id)
         if not session:
             return []
@@ -799,6 +896,15 @@ class GameStateManager:
         if 'involved_entities' in quest_data:
             self.process_involved_entities(session_id, quest_data['involved_entities'])
 
+    def get_quest_giver(self, session_id: str, quest_id: str) -> Optional[str]:
+        """Retrieves the name of the NPC who gave the quest."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT giver_npc FROM quests WHERE id = ? AND session_id = ?", (quest_id, session_id))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+
     def get_active_quests(self, session_id: str) -> List[Dict[str, Any]]:
         """Retrieves active quests and their challenges."""
         conn = sqlite3.connect(DB_PATH)
@@ -809,10 +915,23 @@ class GameStateManager:
         quests = [dict(row) for row in cursor.fetchall()]
         logger.info(f"get_active_quests for {session_id}: Found {len(quests)} quests. IDs: {[q['id'] for q in quests]}")
         
+        # Get player stats for auto-resolution check
+        stats = self.get_player_stats(session_id)
+        
         for quest in quests:
             cursor.execute("SELECT * FROM challenges WHERE quest_id = ?", (quest['id'],))
             quest['challenges'] = [dict(row) for row in cursor.fetchall()]
             quest['involved_entities'] = json.loads(quest['involved_entities']) if quest['involved_entities'] else []
+            
+            # Calculate auto-result for active challenges
+            if quest['status'] == 'active':
+                for challenge in quest['challenges']:
+                    if not challenge['completed']:
+                        stat_value = stats.get(challenge['type'].lower(), 10)
+                        auto_check = self.should_require_roll(challenge['dc'], stat_value)
+                        if not auto_check['requires_roll']:
+                            challenge['auto_result'] = auto_check['outcome']
+                            challenge['auto_narrative'] = auto_check['narrative']
             
         conn.close()
         return quests
@@ -876,23 +995,73 @@ class GameStateManager:
         # But user example: "strength": 5. 
         # Let's assume raw stat for simplicity as per user prompt "roll(1d20) + player.stats[challenge_type]".
         
-        import random
-        roll = random.randint(1, 20)
-        total = roll + stat_bonus
-        success = total >= challenge['dc']
+        # Auto-Resolution Check
+        auto_check = self.should_require_roll(challenge['dc'], stat_bonus)
         
-        result = {
-            "success": success,
-            "roll": roll,
-            "stat_bonus": stat_bonus,
-            "total": total,
-            "dc": challenge['dc'],
-            "margin": total - challenge['dc'],
-            "challenge_type": challenge['type'],
-            "description": challenge['description'],
-            "critical_success": roll == 20,
-            "critical_failure": roll == 1
-        }
+        if not auto_check['requires_roll']:
+            success = auto_check['outcome'] == 'auto_success'
+            roll = 20 if success else 1
+            total = roll + stat_bonus
+            result = {
+                "success": success,
+                "roll": roll,
+                "stat_bonus": stat_bonus,
+                "total": total,
+                "dc": challenge['dc'],
+                "margin": total - challenge['dc'],
+                "challenge_type": challenge['type'],
+                "description": challenge['description'],
+                "critical_success": False,
+                "critical_failure": False,
+                "auto_resolved": True,
+                "narrative": auto_check['narrative'],
+                "severity": "minor" if success else "impossible"
+            }
+            # Relationship Update for Auto-Success
+            if success:
+                self.update_relationship(session_id, self.get_quest_giver(session_id, challenge['quest_id']), 5)
+        else:
+            import random
+            roll = random.randint(1, 20)
+            total = roll + stat_bonus
+            
+            # Critical Failure Override
+            if roll == 1:
+                success = False
+            else:
+                success = total >= challenge['dc']
+            
+            # Determine Severity
+            severity = "success"
+            if not success:
+                severity = self.calculate_failure_severity(total, challenge['dc'], roll == 1)
+            
+            # Relationship Update based on Outcome
+            giver_name = self.get_quest_giver(session_id, challenge['quest_id'])
+            if giver_name:
+                rel_change = {
+                    "success": 8,
+                    "minor": -2,
+                    "major": -5,
+                    "severe": -10,
+                    "critical": -15
+                }.get(severity, 0)
+                if success and roll == 20: rel_change += 5 # Crit success bonus
+                self.update_relationship(session_id, giver_name, rel_change)
+
+            result = {
+                "success": success,
+                "roll": roll,
+                "stat_bonus": stat_bonus,
+                "total": total,
+                "dc": challenge['dc'],
+                "margin": total - challenge['dc'],
+                "challenge_type": challenge['type'],
+                "description": challenge['description'],
+                "critical_success": roll == 20,
+                "critical_failure": roll == 1,
+                "severity": severity
+            }
         
         # Update Challenge
         cursor.execute('''

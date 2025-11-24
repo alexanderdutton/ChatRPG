@@ -238,7 +238,64 @@ async def generate_npc_memory_update(conversation_history: List[Dict],
         return {}
 
 CHALLENGE_SYSTEM_PROMPT = """
-CHALLENGE GENERATION RULES:
+QUEST GENERATION RULES:
+IMPORTANT: Not every conversation needs a quest!
+
+Only offer a quest if:
+1. The NPC's mood is "worried" or "desperate" (not "content" or "happy")
+2. The player explicitly asks for work/help/quests (PLAYER OVERRIDE)
+3. A major event has occurred that requires player involvement
+4. relationship_level > 50 AND quests_given_recently < 2
+
+PLAYER OVERRIDE: If the player explicitly says:
+- "Do you have any work?"
+- "I'm looking for quests"
+- "Need help with anything?"
+
+Then you MAY offer a quest even if mood is "content", BUT:
+- Keep it optional/low-pressure
+- Frame it as "Well, if you're offering..."
+- Don't make it urgent unless mood justifies it
+
+Otherwise, if mood is "content" and player is just chatting:
+- DO NOT offer quests unprompted
+- Engage in conversation, lore, or relationship building
+- Comment on completed quests
+
+FAILING FORWARD RULES:
+When the player fails a challenge, respond based on failure severity:
+
+MINOR FAILURE (missed DC by 1-3):
+- Partial success: Task is done but imperfect
+- Example: "The beam is crooked, but it'll hold."
+- Relationship impact: -2
+
+MAJOR FAILURE (missed DC by 4-8):
+- Alternative needed: Current approach doesn't work
+- Example: "This beam is too heavy for you. Maybe try a pulley?"
+- Relationship impact: -5
+- Suggest different approach or help
+
+SEVERE FAILURE (missed DC by 9+):
+- Quest abandoned: NPC gives up on player help
+- Example: "Never mind, I'll hire a professional."
+- Relationship impact: -10
+- Quest marked as "withdrawn"
+
+CRITICAL FAILURE (Natural 1):
+- Negative outcome: Things get worse
+- Example: "You snapped the beam! Now I need two!"
+- Relationship impact: -15
+- May spawn follow-up consequence
+
+NEVER respond with:
+- "Try again"
+- "Go get more materials and come back"
+- Endless retry loops
+
+Current failure severity: {failure_severity}
+
+CHALLENGE GENERATION FORMAT:
 When the player asks for a quest or you determine the NPC has a task:
 
 1. IF you are offering a quest or giving a task, you MUST output a JSON object wrapped in markdown code blocks (```json ... ```).
@@ -282,6 +339,9 @@ When the player asks for a quest or you determine the NPC has a task:
 
 CURRENT PLAYER STATS:
 {player_stats}
+
+CURRENT NPC STATE:
+{npc_state}
 
 IMPORTANT: Do not invent new attributes for existing entities. 
 Stick to established facts from the world data.

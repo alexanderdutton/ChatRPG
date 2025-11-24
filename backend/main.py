@@ -219,7 +219,23 @@ async def interact_with_npc(user_input: UserInput):
 
     # Inject Challenge System Prompt
     player_stats = game_state_manager.get_player_stats(session_id)
-    challenge_prompt = CHALLENGE_SYSTEM_PROMPT.format(player_stats=json.dumps(player_stats))
+    npc_state = game_state_manager.get_npc_state(session_id, npc_id)
+    
+    # Determine failure severity from recent history
+    failure_severity = "None"
+    if conversation_history and conversation_history[-1]["role"] == "user":
+        last_msg = conversation_history[-1]["parts"][0]
+        if "[System]" in last_msg and "Severity:" in last_msg:
+            import re
+            match = re.search(r"Severity: (\w+)", last_msg)
+            if match:
+                failure_severity = match.group(1)
+
+    challenge_prompt = CHALLENGE_SYSTEM_PROMPT.format(
+        player_stats=json.dumps(player_stats),
+        npc_state=json.dumps(npc_state),
+        failure_severity=failure_severity
+    )
 
     # Inject Quest History (Active/Completed/Failed only)
     quest_history = game_state_manager.get_quest_context_for_npc(session_id)
@@ -312,7 +328,14 @@ from fastapi import BackgroundTasks
 
 def update_history_background(session_id: str, result: Dict[str, Any]):
     history = game_state_manager.get_conversation_history(session_id)
-    system_note = f"[System] Player resolved challenge '{result.get('description', 'Unknown')}' with result: {'Success' if result.get('success') else 'Failure'}."
+    
+    severity_note = ""
+    if not result.get('success'):
+        severity_note = f" (Severity: {result.get('severity', 'Unknown')})"
+    elif result.get('auto_resolved'):
+        severity_note = " (Auto-Success)"
+        
+    system_note = f"[System] Player resolved challenge '{result.get('description', 'Unknown')}' with result: {'Success' if result.get('success') else 'Failure'}{severity_note}."
     history.append({"role": "user", "parts": [system_note]})
     game_state_manager.update_conversation_history(session_id, history)
 

@@ -390,13 +390,24 @@
                         const statusColor = ch.completed ? (isSuccess ? '#4caf50' : '#f44336') : '#ff9800';
                         const statusIcon = ch.completed ? (isSuccess ? '✓' : '✕') : '○';
 
-                        // Roll Button (only if not completed and quest is active)
+                        // Roll Button / Auto-Resolution
                         let rollBtn = '';
                         if (!ch.completed && quest.status === 'active') {
-                            if (currentGameMode === "EXPLORATION") {
-                                rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px;" onclick="rollChallenge('${quest.id}', '${ch.id}', '${ch.type}', ${ch.dc})">Roll</button>`;
+                            if (ch.auto_result === 'auto_success') {
+                                // Auto-Success: Show Claim Button
+                                rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px; background-color: #4caf50; border-color: #4caf50;" onclick="rollChallenge('${quest.id}', '${ch.id}', '${ch.type}', ${ch.dc})">✓ Auto-Complete</button>
+                                           <div style="font-size: 0.8em; color: #aaddff; font-style: italic; margin-top: 2px;">${ch.auto_narrative || "Trivial task."}</div>`;
+                            } else if (ch.auto_result === 'auto_failure') {
+                                // Auto-Failure: Show Impossible Label
+                                rollBtn = `<span style="font-size:0.7em; padding:2px 5px; margin-left:5px; color: #f44336; border: 1px solid #f44336; border-radius: 3px;">Impossible</span>
+                                           <div style="font-size: 0.8em; color: #f44336; font-style: italic; margin-top: 2px;">${ch.auto_narrative || "Beyond your ability."}</div>`;
                             } else {
-                                rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px; opacity: 0.5; cursor: not-allowed;" title="Cannot roll during conversation" disabled>Roll</button>`;
+                                // Normal Roll
+                                if (currentGameMode === "EXPLORATION") {
+                                    rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px;" onclick="rollChallenge('${quest.id}', '${ch.id}', '${ch.type}', ${ch.dc})">Roll</button>`;
+                                } else {
+                                    rollBtn = `<button class="btn" style="font-size:0.7em; padding:2px 5px; margin-left:5px; opacity: 0.5; cursor: not-allowed;" title="Cannot roll during conversation" disabled>Roll</button>`;
+                                }
                             }
                         }
 
@@ -845,7 +856,7 @@
                 // Display Result
                 const color = res.success ? '#4caf50' : '#f44336';
                 const icon = res.success ? '✓' : '✕';
-                const resultMsg = `<div style="color:${color}; font-weight:bold; margin: 5px 0;">
+                const resultMsg = `<div style='color:${color}; font-weight:bold; margin: 5px 0;'>
                     ${icon} Rolled ${res.roll} + ${res.stat_bonus} = ${res.total} (DC ${res.dc}) - ${res.success ? 'SUCCESS' : 'FAILURE'}
                 </div>`;
                 addMessage(resultMsg, 'system', document.getElementById('chat-container'));

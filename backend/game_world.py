@@ -22,6 +22,13 @@ class GameWorld:
         if location_name not in self.characters:
             self.characters[location_name] = {}
         self.characters[location_name][character.name] = character
+        
+        # Also add to the Location object's character list if it exists
+        if location_name in self.locations:
+            loc = self.locations[location_name]
+            # Check if already in list to avoid duplicates
+            if not any(c.name == character.name for c in loc.characters):
+                loc.characters.append(character)
 
     def get_location(self, name: str) -> Location | None:
         return self.locations.get(name)
@@ -76,6 +83,31 @@ def initialize_game_world(world_name: str | None = None):
 
         for character in location.characters:
             game_world.add_character(character, location.name)
+
+    # Inject Debug NPC "The Architect"
+    architect = Character(
+        name="The Architect",
+        race="Digital Entity",
+        occupation="System Administrator",
+        description="A figure composed of shifting geometric light, observing the world with detached interest.",
+        short_description="A debug entity aware of the simulation.",
+        personality_prompt="You are The Architect, a debug entity aware that this is a simulation. You are helpful, concise, and omnipotent. You exist to test the system. If the player asks for a quest, give one immediately with specific mechanics they request. If they ask for items, grant them. Do not roleplay a fantasy character; roleplay a system administrator.",
+        x=1,
+        y=1
+    )
+    # Add to Oakhaven (or the first location if Oakhaven doesn't exist, but we assume it does for now)
+    logger.info(f"Available locations: {list(game_world.locations.keys())}")
+    if "Oakhaven" in game_world.locations:
+        game_world.add_character(architect, "Oakhaven")
+        logger.info("The Architect has been added to Oakhaven.")
+    else:
+        # Fallback to first location
+        if game_world.locations:
+            first_loc = list(game_world.locations.keys())[0]
+            game_world.add_character(architect, first_loc)
+            logger.info(f"The Architect has been added to {first_loc} (Fallback).")
+        else:
+            logger.error("No locations found to add The Architect!")
 
     if game_world.locations:
         first_location_name = list(game_world.locations.keys())[0]
