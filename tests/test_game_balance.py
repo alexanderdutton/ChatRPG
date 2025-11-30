@@ -155,5 +155,55 @@ class TestGameBalance(unittest.TestCase):
         self.assertEqual(state["quests_given_recently"], 0) # Should decay by 2
         print(f"  [Pass] Decay after 2 hours -> {state['quests_given_recently']}")
 
+    def test_tier_config(self):
+        """Test Entity Tier Configuration."""
+        print("\nTesting Entity Tiers...")
+        
+        # Test Average Tier
+        config = self.gsm.get_tier_config("average")
+        self.assertEqual(config["dc_range"], (10, 12))
+        print(f"  [Pass] Average Tier DC Range: {config['dc_range']}")
+
+        # Test Boss Tier
+        config = self.gsm.get_tier_config("boss")
+        self.assertEqual(config["dc_range"], (22, 25))
+        print(f"  [Pass] Boss Tier DC Range: {config['dc_range']}")
+
+        # Test Default (Fallback)
+        config = self.gsm.get_tier_config("unknown_tier")
+        self.assertEqual(config["dc_range"], (10, 12)) # Should default to average
+        print(f"  [Pass] Unknown Tier defaults to Average")
+
+    def test_economy_validation(self):
+        """Test Economy Validation (Gold Capping)."""
+        print("\nTesting Economy Validation...")
+        
+        # Case 1: Valid Reward (Average Tier, 20 Gold)
+        quest_data = {
+            "tier": "average",
+            "rewards": {"gold": 20}
+        }
+        validated = self.gsm.validate_quest_rewards(quest_data)
+        self.assertEqual(validated["rewards"]["gold"], 20)
+        print(f"  [Pass] Average Tier (20g) -> {validated['rewards']['gold']}g (Unchanged)")
+
+        # Case 2: Excessive Reward (Average Tier, 500 Gold)
+        quest_data = {
+            "tier": "average",
+            "rewards": {"gold": 500}
+        }
+        validated = self.gsm.validate_quest_rewards(quest_data)
+        self.assertEqual(validated["rewards"]["gold"], 25) # Capped at max for average (25)
+        print(f"  [Pass] Average Tier (500g) -> {validated['rewards']['gold']}g (Capped)")
+
+        # Case 3: Boss Tier (800 Gold)
+        quest_data = {
+            "tier": "boss",
+            "rewards": {"gold": 800}
+        }
+        validated = self.gsm.validate_quest_rewards(quest_data)
+        self.assertEqual(validated["rewards"]["gold"], 800)
+        print(f"  [Pass] Boss Tier (800g) -> {validated['rewards']['gold']}g (Unchanged)")
+
 if __name__ == '__main__':
     unittest.main()

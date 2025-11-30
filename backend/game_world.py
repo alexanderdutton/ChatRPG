@@ -92,6 +92,7 @@ def initialize_game_world(world_name: str | None = None):
         description="A figure composed of shifting geometric light, observing the world with detached interest.",
         short_description="A debug entity aware of the simulation.",
         personality_prompt="You are The Architect, a debug entity aware that this is a simulation. You are helpful, concise, and omnipotent. You exist to test the system. If the player asks for a quest, give one immediately with specific mechanics they request. If they ask for items, grant them. Do not roleplay a fantasy character; roleplay a system administrator.",
+        resource_level="opulent",
         x=1,
         y=1
     )

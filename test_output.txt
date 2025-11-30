@@ -1,59 +1,44 @@
-C:\Projects\_GeminiAssist\ChatRPG\backend\game_world.py:67: PydanticDeprecatedSince20: The `parse_obj` method is deprecated; use `model_validate` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
-  game_data = GameWorldData.parse_obj(game_data_dict)
-EEEE
+F.FF.F.
 ======================================================================
-ERROR: test_auto_resolution (__main__.TestGameBalance.test_auto_resolution)
-Test Auto-Success and Auto-Failure logic.
+GameStateManager initialized with SQLite.
+FAIL: test_calculate_quest_rewards_poor (__main__.TestEconomy.test_calculate_quest_rewards_poor)
+GameStateManager initialized with SQLite.
+GameStateManager initialized with SQLite.
+GameStateManager initialized with SQLite.
+GameStateManager initialized with SQLite.
+GameStateManager initialized with SQLite.
+GameStateManager initialized with SQLite.
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
-    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
-  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
-    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
-sqlite3.OperationalError: no such column: player_stats
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_economy.py", line 36, in test_calculate_quest_rewards_poor
+    self.assertIsNone(gold_reward)
+AssertionError: {'type': 'gold', 'amount': 1} is not None
 
 ======================================================================
-ERROR: test_failure_severity (__main__.TestGameBalance.test_failure_severity)
-Test Failure Severity Calculation.
+FAIL: test_npc_resource_levels (__main__.TestEconomy.test_npc_resource_levels)
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
-    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
-  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
-    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
-sqlite3.OperationalError: no such column: player_stats
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_economy.py", line 23, in test_npc_resource_levels
+    self.assertIn("gold", NPC_RESOURCE_LEVELS["wealthy"]["can_offer"])
+AssertionError: 'gold' not found in ['substantial_gold', 'rare_items', 'political_favors', 'land_grants']
 
 ======================================================================
-ERROR: test_quest_spam_prevention (__main__.TestGameBalance.test_quest_spam_prevention)
-Test Quest Cooldowns.
+FAIL: test_validate_llm_quest_rewards_inflated_gold (__main__.TestEconomy.test_validate_llm_quest_rewards_inflated_gold)
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
-    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
-  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
-    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
-sqlite3.OperationalError: no such column: player_stats
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_economy.py", line 93, in test_validate_llm_quest_rewards_inflated_gold
+    self.assertIn("Gold amount too high", errors[0])
+AssertionError: 'Gold amount too high' not found in 'Merchant (resource level: wealthy) cannot offer gold.'
 
 ======================================================================
-ERROR: test_relationship_updates (__main__.TestGameBalance.test_relationship_updates)
-Test Relationship Modifiers.
+FAIL: test_validate_llm_quest_rewards_valid (__main__.TestEconomy.test_validate_llm_quest_rewards_valid)
 ----------------------------------------------------------------------
 Traceback (most recent call last):
-  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_game_balance.py", line 36, in setUp
-    self.gsm._update_session_field(self.session_id, "player_stats", {"strength": 10, "dexterity": 10})
-  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 227, in _update_session_field
-    cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
-sqlite3.OperationalError: no such column: player_stats
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\test_economy.py", line 65, in test_validate_llm_quest_rewards_valid
+    self.assertEqual(len(errors), 0)
+AssertionError: 1 != 0
 
 ----------------------------------------------------------------------
-Ran 4 tests in 0.170s
+Ran 7 tests in 0.012s
 
-FAILED (errors=4)
-GameStateManager initialized with SQLite.
-Session test_session_balance created with initial NPC states.
-GameStateManager initialized with SQLite.
-Session test_session_balance created with initial NPC states.
-GameStateManager initialized with SQLite.
-Session test_session_balance created with initial NPC states.
-GameStateManager initialized with SQLite.
-Session test_session_balance created with initial NPC states.
+FAILED (failures=4)

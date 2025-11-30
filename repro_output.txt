@@ -1,0 +1,17 @@
+E
+======================================================================
+ERROR: test_quest_acceptance_flow (__main__.TestQuestAcceptance.test_quest_acceptance_flow)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Projects\_GeminiAssist\ChatRPG\tests\repro_quest_acceptance.py", line 19, in setUp
+    self.gsm.create_session(self.session_id, "TestPlayer")
+  File "C:\Projects\_GeminiAssist\ChatRPG\backend\game_state_manager.py", line 497, in create_session
+    first_location_name = list(game_world.locations.keys())[0]
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+IndexError: list index out of range
+
+----------------------------------------------------------------------
+GameStateManager initialized with SQLite.
+Ran 1 test in 0.004s
+
+FAILED (errors=1)

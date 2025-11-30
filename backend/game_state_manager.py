@@ -30,6 +30,150 @@ RELATIONSHIP_MODIFIERS = {
     "quest_abandoned": -8
 }
 
+ENTITY_TIERS = {
+    "trivial": {
+        "dc_range": (5, 8),
+        "hp_range": (1, 5),
+        "damage": "1d4",
+        "description": "Rats, drunk peasants, children. No real threat.",
+        "examples": ["Rat", "Drunkard", "Child"]
+    },
+    "average": {
+        "dc_range": (10, 12),
+        "hp_range": (10, 20),
+        "damage": "1d6",
+        "description": "Town guards, wild animals, common bandits. Fair fight.",
+        "examples": ["Guard", "Wolf", "Bandit"]
+    },
+    "tough": {
+        "dc_range": (15, 17),
+        "hp_range": (25, 40),
+        "damage": "2d6",
+        "description": "Veteran soldiers, dire wolves, skilled duelists. Challenging.",
+        "examples": ["Veteran", "Dire Wolf", "Duelist"]
+    },
+    "elite": {
+        "dc_range": (18, 20),
+        "hp_range": (50, 80),
+        "damage": "3d6",
+        "description": "Champion fighters, young dragons, master assassins. Requires prep.",
+        "examples": ["Champion", "Young Dragon", "Assassin"]
+    },
+    "boss": {
+        "dc_range": (22, 25),
+        "hp_range": (100, 150),
+        "damage": "4d6+5",
+        "description": "Warlords, ancient dragons, demon lords. Major climax.",
+        "examples": ["Warlord", "Ancient Dragon", "Demon Lord"]
+    },
+    "legendary": {
+        "dc_range": (26, 30),
+        "hp_range": (200, 500),
+        "damage": "6d8+10",
+        "description": "Gods, apocalyptic threats. Campaign defining.",
+        "examples": ["God", "Titan", "Avatar"]
+    }
+}
+
+VALUE_TIERS = {
+    "tier_0_trivial": {
+        "xp": (5, 15),
+        "base_reward": "goodwill",
+        "difficulty_dc": (5, 8),
+        "gold": (1, 5), # Kept for backward compatibility/reference
+        "items": ["rusty_dagger", "stale_bread", "pebble"]
+    },
+    "tier_1_minor": {
+        "xp": (25, 50),
+        "base_reward": "modest",
+        "difficulty_dc": (10, 12),
+        "gold": (10, 25),
+        "items": ["iron_sword", "leather_armor", "healing_potion"]
+    },
+    "tier_2_standard": {
+        "xp": (100, 200),
+        "base_reward": "fair",
+        "difficulty_dc": (15, 17),
+        "gold": (50, 100),
+        "items": ["steel_sword", "chainmail", "quality_healing_potion"]
+    },
+    "tier_3_significant": {
+        "xp": (300, 500),
+        "base_reward": "generous",
+        "difficulty_dc": (18, 20),
+        "gold": (150, 300),
+        "items": ["enchanted_blade", "plate_armor", "rare_elixir"]
+    },
+    "tier_4_major": {
+        "xp": (750, 1500),
+        "base_reward": "lavish",
+        "difficulty_dc": (22, 25),
+        "gold": (500, 1000),
+        "items": ["legendary_weapon", "artifact_armor", "phoenix_down"]
+    },
+    "tier_5_legendary": {
+        "xp": (2000, 5000),
+        "base_reward": "legendary",
+        "difficulty_dc": (26, 30),
+        "gold": (2000, 5000),
+        "items": ["god_killer", "world_shaper"]
+    }
+}
+
+# Map old tier names to new ones for backward compatibility
+TIER_MAPPING = {
+    "trivial": "tier_0_trivial",
+    "average": "tier_1_minor", 
+    "tough": "tier_2_standard",
+    "elite": "tier_3_significant", # or tier_4 depending on interpretation, let's map to 3
+    "boss": "tier_4_major",
+    "legendary": "tier_5_legendary"
+}
+
+NPC_RESOURCE_LEVELS = {
+    "destitute": {
+        "description": "Has nothing to give",
+        "can_offer": ["gratitude", "information", "future_favor"],
+        "cannot_offer": ["gold", "items", "property"],
+        "examples": "beggars, refugees, children, imprisoned"
+    },
+    "poor": {
+        "description": "Subsistence living",
+        "can_offer": ["food", "simple_tools", "shelter", "minor_favor"],
+        "gold_range": (1, 10),
+        "item_tier": "common",
+        "examples": "peasants, laborers, struggling merchants"
+    },
+    "modest": {
+        "description": "Working class",
+        "can_offer": ["modest_gold", "quality_goods", "trade_services"],
+        "gold_range": (10, 50),
+        "item_tier": "common_to_uncommon",
+        "examples": "craftsmen, guards, innkeepers, small merchants"
+    },
+    "comfortable": {
+        "description": "Established professionals",
+        "can_offer": ["good_gold", "fine_items", "connections", "property_access"],
+        "gold_range": (50, 200),
+        "item_tier": "uncommon_to_rare",
+        "examples": "successful merchants, minor nobles, guild masters"
+    },
+    "wealthy": {
+        "description": "Local elite",
+        "can_offer": ["substantial_gold", "rare_items", "political_favors", "land_grants"],
+        "gold_range": (200, 1000),
+        "item_tier": "rare_to_epic",
+        "examples": "nobles, merchant princes, high priests"
+    },
+    "opulent": {
+        "description": "Regional powers",
+        "can_offer": ["vast_gold", "legendary_items", "titles", "armies"],
+        "gold_range": (1000, 10000),
+        "item_tier": "epic_to_legendary",
+        "examples": "kings, archmages, dragons, gods"
+    }
+}
+
 class GameStateManager:
 
     def __init__(self):
@@ -194,6 +338,112 @@ class GameStateManager:
         
         self.update_npc_state(session_id, npc_name, npc_state)
         logger.info(f"Updated relationship with {npc_name}: {current_relationship} -> {new_relationship} (Modifier: {modifier})")
+
+    def get_tier_config(self, tier_name: str) -> Dict[str, Any]:
+        """Retrieves configuration for a specific entity tier."""
+        # Handle new tier names and backward compatibility
+        mapped_tier = TIER_MAPPING.get(tier_name.lower(), tier_name.lower())
+        return VALUE_TIERS.get(mapped_tier, VALUE_TIERS["tier_1_minor"])
+
+    def calculate_quest_rewards(self, quest_tier: str, npc_profile: Dict[str, Any], relationship: int) -> Dict[str, Any]:
+        """
+        Determines appropriate rewards based on context.
+        """
+        # Map tier if needed
+        mapped_tier = TIER_MAPPING.get(quest_tier.lower(), quest_tier.lower())
+        tier_data = VALUE_TIERS.get(mapped_tier, VALUE_TIERS["tier_1_minor"])
+        
+        resource_level_key = npc_profile.get("resource_level", "poor")
+        resource_level = NPC_RESOURCE_LEVELS.get(resource_level_key, NPC_RESOURCE_LEVELS["poor"])
+        
+        # XP is always given (universal)
+        base_xp = tier_data["xp"]
+        import random
+        xp = random.randint(base_xp[0], base_xp[1])
+        
+        # Relationship modifier (better relationship = slightly better rewards)
+        relationship_multiplier = 1.0 + (relationship - 50) / 200  # 0.75x to 1.25x
+        
+        rewards = {
+            "xp": int(xp * relationship_multiplier),
+            "material_rewards": []
+        }
+        
+        # Determine if NPC can offer material rewards
+        if "gold" in resource_level["can_offer"] or "gold_range" in resource_level:
+            gold_range = resource_level.get("gold_range", (0, 0))
+            
+            # Scale gold by quest tier
+            # We need a multiplier based on the tier index or relative value
+            # Let's derive it from the tier's gold vs base tier gold
+            # Or use the multiplier logic from the user request
+            tier_multipliers = {
+                "tier_0_trivial": 0.5,
+                "tier_1_minor": 1.0,
+                "tier_2_standard": 2.0,
+                "tier_3_significant": 4.0,
+                "tier_4_major": 8.0,
+                "tier_5_legendary": 16.0
+            }
+            tier_multiplier = tier_multipliers.get(mapped_tier, 1.0)
+            
+            min_gold = int(gold_range[0] * tier_multiplier * relationship_multiplier)
+            max_gold = int(gold_range[1] * tier_multiplier * relationship_multiplier)
+            
+            if max_gold > 0:
+                rewards["material_rewards"].append({
+                    "type": "gold",
+                    "amount": random.randint(min_gold, max_gold)
+                })
+        
+        # Check for other rewards NPC can offer
+        if "items" in resource_level["can_offer"]:
+            item_tier = resource_level.get("item_tier", "common")
+            rewards["material_rewards"].append({
+                "type": "item",
+                "tier": item_tier,
+                "source": npc_profile.get("name", "Unknown")
+            })
+        
+        if "information" in resource_level["can_offer"]:
+            rewards["material_rewards"].append({
+                "type": "information",
+                "value": "lore_or_quest_hook"
+            })
+        
+        if "future_favor" in resource_level["can_offer"]:
+            rewards["material_rewards"].append({
+                "type": "favor_token",
+                "redeemable_with": npc_profile.get("name", "Unknown") # Use name or ID if available
+            })
+        
+        return rewards
+
+    def validate_quest_rewards(self, quest_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensures quest rewards match the quest tier."""
+        tier_raw = quest_data.get("tier", "average").lower()
+        tier = TIER_MAPPING.get(tier_raw, "tier_1_minor")
+        tier_rules = VALUE_TIERS.get(tier, VALUE_TIERS["tier_1_minor"])
+        
+        # Validate Gold
+        gold_reward = quest_data.get("rewards", {}).get("gold", 0)
+        max_gold = tier_rules["gold"][1]
+        if gold_reward > max_gold:
+            logger.warning(f"Capping gold reward for {tier} quest from {gold_reward} to {max_gold}")
+            if "rewards" not in quest_data:
+                quest_data["rewards"] = {}
+            quest_data["rewards"]["gold"] = max_gold
+            
+        # Validate Items (Basic check: ensure items exist in game world or are generic)
+        # For now, we trust the LLM on item names but could restrict to the tier list
+        # strict_items = tier_rules["items"]
+        # item_rewards = quest_data.get("rewards", {}).get("items", [])
+        # filtered_items = [i for i in item_rewards if i in strict_items]
+        # if len(filtered_items) != len(item_rewards):
+        #     logger.warning(f"Filtered invalid items for {tier} quest.")
+        #     quest_data["rewards"]["items"] = filtered_items
+            
+        return quest_data
 
     def _get_session_data(self, session_id: str) -> Dict[str, Any] | None:
         """Helper to retrieve full session data."""
@@ -907,7 +1157,7 @@ class GameStateManager:
             session_id, 
             quest_data['giver_npc'], 
             quest_data['description'], 
-            'offered', # Default status when added via offer
+            quest_data.get('status', 'offered'), # Use provided status or default to offered
             json.dumps(quest_data.get('involved_entities', [])),
             quest_data.get('accept_response', "I'm glad you accepted."),
             quest_data.get('refuse_response', "That is unfortunate.")
@@ -931,6 +1181,16 @@ class GameStateManager:
         
         conn.commit()
         conn.close()
+
+    def get_quest_log(self, session_id: str) -> List[str]:
+        """Retrieves the player's quest log (titles/descriptions of active/completed quests)."""
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        # Fetch active and completed quests
+        cursor.execute("SELECT description FROM quests WHERE session_id = ? AND status IN ('active', 'completed')", (session_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
 
     def accept_quest(self, session_id: str, quest_id: str) -> str:
         """Updates quest status to 'active' and returns accept response."""

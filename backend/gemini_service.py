@@ -237,9 +237,137 @@ async def generate_npc_memory_update(conversation_history: List[Dict],
         logger.error(f"Error generating NPC memory update: {e}")
         return {}
 
+ANTI_YES_AND_RULES = """
+CRITICAL INSTRUCTION - MECHANICAL INTEGRITY:
+
+You are a NARRATOR, not a GAME MASTER. You do NOT decide outcomes.
+
+FORBIDDEN ACTIONS:
+❌ Letting player succeed when outcome = "failure"
+❌ Reducing enemy difficulty because player tried something clever
+❌ Giving player bonus stats/abilities they don't have
+❌ Ignoring established entity tiers
+❌ Creating new mechanical effects (damage, healing, buffs)
+❌ Allowing "narrative workarounds" to mechanical failures
+
+ALLOWED ACTIONS:
+✅ Describing outcomes in flavorful ways
+✅ Adding atmospheric details
+✅ Giving emotional responses from NPCs
+✅ Suggesting alternative approaches (after failure is narrated)
+
+EXAMPLE - CORRECT BEHAVIOR:
+Mechanical Outcome: FAILURE (player STR 12, bully DC 15, roll: 8)
+Your Response: "You throw a punch, but the bully is faster. He catches your wrist and twists it painfully. You're not strong enough to overpower him."
+
+EXAMPLE - WRONG BEHAVIOR:
+Mechanical Outcome: FAILURE
+Your Response: "You cleverly feint and catch him off-guard, landing a solid hit!" ← NO. This contradicts the failure.
+
+If the player says "but I should have succeeded because..." → 
+You respond: "I understand your frustration, but mechanically your Strength wasn't high enough. You could try a different approach (Dexterity to dodge?) or come back when you're stronger."
+
+You are an impartial narrator of pre-determined outcomes.
+You do NOT reward creativity with mechanical success.
+Creativity gets narrative flavor, not rule-breaking.
+"""
+
+ENTITY_TIER_DESCRIPTIONS = """
+ENTITY TIERS (Use these to gauge difficulty):
+- Trivial: Rats, drunk peasants, children. No real threat. (DC 5-8)
+- Average: Town guards, wild animals, common bandits. Fair fight. (DC 10-12)
+- Tough: Veteran soldiers, dire wolves, skilled duelists. Challenging. (DC 15-17)
+- Elite: Champion fighters, young dragons, master assassins. Requires prep. (DC 18-20)
+- Boss: Warlords, ancient dragons, demon lords. Major climax. (DC 22-25)
+- Legendary: Gods, apocalyptic threats. Campaign defining. (DC 26-30)
+"""
+
+QUEST_REWARD_RULES = """
+QUEST REWARD SYSTEM:
+
+NPC RESOURCE PROFILE:
+- Resource Level: {{resource_level}}
+- Can Offer: {{can_offer}}
+- Cannot Offer: {{cannot_offer}}
+
+REWARD RULES:
+1. XP is automatic based on Tier (do not mention specific XP amounts).
+2. Material rewards MUST match your Resource Level and the Quest Tier.
+3. If you are 'destitute' or 'poor', you cannot offer gold (or very little). Offer gratitude, food, or information instead.
+4. If you are 'wealthy', you can offer gold and items, but within limits.
+
+TIER REFERENCE (Gold Ranges):
+- Tier 0 (Trivial): 1-5 gold (if affordable)
+- Tier 1 (Minor): 10-25 gold
+- Tier 2 (Standard): 50-100 gold
+- Tier 3 (Significant): 150-300 gold
+- Tier 4 (Major): 500-1000 gold
+- Tier 5 (Legendary): 2000-5000 gold
+
+When offering a quest, generate a JSON with "quest_offered" containing "rewards" object with "gold" (int) and "items" (list of strings).
+When the player accepts a quest, generate a JSON with "quest_accepted": "quest_id".
+IMPORTANT: When accepting, DO NOT just say "Quest Accepted". Write a natural response from the NPC (e.g., "Excellent! I knew I could count on you," or "Thank you. Here are the details...").
+"""
+
+def validate_llm_quest_rewards(llm_output: Dict[str, Any], npc_profile: Dict[str, Any], calculated_rewards: Dict[str, Any]) -> List[str]:
+    """
+    Ensures LLM didn't promise rewards NPC can't deliver.
+    """
+    errors = []
+    
+    from .game_state_manager import NPC_RESOURCE_LEVELS
+    
+    resource_level_name = npc_profile.get("resource_level", "poor")
+    resource_level_config = NPC_RESOURCE_LEVELS.get(resource_level_name, NPC_RESOURCE_LEVELS["poor"])
+    
+    quest_data = llm_output.get("quest_offered", {})
+    if not quest_data:
+        return []
+
+    rewards = quest_data.get("rewards", {})
+    
+    # Check gold promises
+    offered_gold = rewards.get("gold", 0)
+    if offered_gold > 0:
+        # Check if NPC can offer gold at all
+        can_offer_gold = "gold_range" in resource_level_config or any("gold" in offer for offer in resource_level_config["can_offer"])
+        
+        if not can_offer_gold:
+             errors.append(f"{npc_profile.get('name', 'NPC')} (resource level: {resource_level_name}) cannot offer gold.")
+        else:
+            # Check against calculated max gold
+            max_gold = 0
+            for r in calculated_rewards.get("material_rewards", []):
+                if r.get("type") == "gold":
+                    max_gold = max(max_gold, r.get("amount", 0))
+            
+            # Allow 50% wiggle room
+            if offered_gold > max_gold * 1.5:
+                errors.append(f"Gold amount too high: {offered_gold} vs calculated max {max_gold} (with 50% buffer).")
+
+    # Check for items
+    offered_items = rewards.get("items", [])
+    if offered_items:
+        # This is a basic check. More sophisticated validation would require
+        # a detailed list of what each resource level 'can_offer' in terms of specific items.
+        if "items" not in resource_level_config["can_offer"] and "valuable_items" not in resource_level_config["can_offer"]:
+            errors.append(f"{npc_profile.get('name', 'NPC')} (resource level: {resource_level_name}) cannot offer items.")
+        # Further validation could check if specific item names are within the NPC's capacity
+        # based on a more detailed 'can_offer' list or a separate item database.
+    
+    return errors
+
+
 CHALLENGE_SYSTEM_PROMPT = """
+{ANTI_YES_AND_RULES}
+
+{ENTITY_TIER_DESCRIPTIONS}
+
+{QUEST_REWARD_RULES}
+
 QUEST GENERATION RULES:
 IMPORTANT: Not every conversation needs a quest!
+
 
 Only offer a quest if:
 1. The NPC's mood is "worried" or "desperate" (not "content" or "happy")
@@ -300,28 +428,30 @@ Current failure severity: {failure_severity}
 CHALLENGE GENERATION FORMAT:
 When the player asks for a quest or you determine the NPC has a task:
 
-1. IF you are offering a quest or giving a task, you MUST output a JSON object wrapped in markdown code blocks (```json ... ```).
-   The structure MUST be EXACTLY:
+1. Create a JSON object with "quest_offered".
+2. "challenges" is a list of steps.
+3. "tier" MUST be one of: trivial, average, tough, elite, boss, legendary.
+
 {{
-  "dialogue": "Your spoken response here (e.g. 'I need your help with...')",
-  "quest_offered": {{
-    "id": "unique_quest_id",
-    "description": "Brief quest description",
-    "giver_npc": "NPC Name",
-    "accept_response": "What you will say if the player accepts the quest (e.g., 'Excellent! I knew I could count on you.')",
-    "refuse_response": "What you will say if the player refuses the quest (e.g., 'A pity. Perhaps another time.')",
-    "challenges": [
-        {{
-            "id": "challenge_id_1",
-            "type": "strength|dexterity|intelligence|charisma",
-            "difficulty": "easy|medium|hard|heroic",
-            "dc": 10|15|20|25,
-            "description": "Description of the specific challenge (e.g. 'Break down the door')"
-        }}
-    ],
-    "involved_entities": ["entity_id_1", "entity_id_2"]
-  }}
+    "quest_offered": {{
+        "id": "quest_id_snake_case",
+        "description": "Brief description of the task.",
+        "giver_npc": "{{npc_name}}",
+        "tier": "average", 
+        "accept_response": "Great, I knew I could count on you.",
+        "refuse_response": "A pity. I'll find someone else.",
+        "challenges": [
+            {{
+                "id": "challenge_id_snake_case",
+                "type": "Strength",
+                "tier": "average",
+                "description": "Lift the heavy beam."
+            }}
+        ],
+        "involved_entities": ["Entity Name 1", "Entity Name 2"]
+    }}
 }}
+
 
 2. Difficulty to DC mapping:
    - easy: DC 10
@@ -359,11 +489,14 @@ Stick to established facts from the world data.
     - **failure_response**: What you will say if the player fails (e.g., "I don't think so. Move along.").
 
 IMPORTANT: You MUST output valid JSON. If you are offering a quest, the 'quest_offered' field is mandatory. If resolving a quest, 'quest_resolved' is mandatory. Do not just write the dialogue.
-"""
+""".replace("{ANTI_YES_AND_RULES}", ANTI_YES_AND_RULES).replace("{ENTITY_TIER_DESCRIPTIONS}", ENTITY_TIER_DESCRIPTIONS).replace("{QUEST_REWARD_RULES}", QUEST_REWARD_RULES)
 
 def validate_quest_output(quest_data: Dict[str, Any]) -> List[str]:
     """Returns list of validation errors, empty if valid."""
     errors = []
+    
+    if not quest_data:
+        return ["Quest data is empty or None"]
     
     # Check for required fields in Quest
     required_quest = ["id", "description", "challenges", "accept_response", "refuse_response"]

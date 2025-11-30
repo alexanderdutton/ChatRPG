@@ -33,6 +33,7 @@ class Character(BaseModel):
     occupation: str
     description: str
     personality_prompt: str
+    resource_level: str = "poor"
     x: int
     y: int
     short_description: str = Field(..., description="A brief, one-sentence description of the character for quick reference.")

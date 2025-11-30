@@ -231,10 +231,18 @@ async def interact_with_npc(user_input: UserInput):
             if match:
                 failure_severity = match.group(1)
 
+    # Get Resource Info
+    from .game_state_manager import NPC_RESOURCE_LEVELS
+    resource_level_key = npc_info.get("resource_level", "poor")
+    resource_config = NPC_RESOURCE_LEVELS.get(resource_level_key, NPC_RESOURCE_LEVELS["poor"])
+
     challenge_prompt = CHALLENGE_SYSTEM_PROMPT.format(
         player_stats=json.dumps(player_stats),
         npc_state=json.dumps(npc_state),
-        failure_severity=failure_severity
+        failure_severity=failure_severity,
+        resource_level=resource_level_key,
+        can_offer=", ".join(resource_config["can_offer"]),
+        cannot_offer=", ".join(resource_config.get("cannot_offer", []))
     )
 
     # Inject Quest History (Active/Completed/Failed only)
@@ -262,21 +270,57 @@ async def interact_with_npc(user_input: UserInput):
     # Handle Quest Offer
     if "quest_offered" in metadata:
         quest_data = metadata["quest_offered"]
-        validation_errors = validate_quest_output(quest_data)
-        if not validation_errors:
-            logger.info(f"Valid quest offered: {quest_data['id']}")
+        if quest_data:
+            from .gemini_service import validate_llm_quest_rewards
             
-            # Inject difficulty info for frontend display
-            player_stats = game_state_manager.get_player_stats(session_id)
-            for ch in quest_data.get('challenges', []):
-                stat_key = ch['type'].lower()
-                player_stat = player_stats.get(stat_key, 10)
-                resolution = game_state_manager.should_require_roll(ch['dc'], player_stat)
-                ch.update(resolution)
+            validation_errors = validate_quest_output(quest_data)
             
-            game_state_manager.add_quest(session_id, quest_data)
+            # Additional Economy Validation
+            if not validation_errors:
+                # Calculate expected rewards to validate against
+                quest_tier = quest_data.get("tier", "average")
+                relationship = npc_state.get("relationship", 50)
+                calculated_rewards = game_state_manager.calculate_quest_rewards(quest_tier, npc_info, relationship)
+                
+                economy_errors = validate_llm_quest_rewards(metadata, npc_info, calculated_rewards)
+                if economy_errors:
+                    validation_errors.extend(economy_errors)
+                    logger.warning(f"Economy validation errors: {economy_errors}")
+                    # Optionally, we could overwrite the rewards with calculated ones here
+                    # quest_data["rewards"] = calculated_rewards["material_rewards"]
+            
+            if not validation_errors:
+                # Validate Rewards against Economy (Legacy check, maybe redundant now but safe)
+                quest_data = game_state_manager.validate_quest_rewards(quest_data)
+                
+                logger.info(f"Valid quest offered: {quest_data['id']}")
+                
+                # Inject difficulty info for frontend display
+                player_stats = game_state_manager.get_player_stats(session_id)
+                for ch in quest_data.get('challenges', []):
+                    # Tier-based DC Assignment
+                    if 'tier' in ch:
+                        tier_config = game_state_manager.get_tier_config(ch['tier'])
+                        import random
+                        ch['dc'] = random.randint(tier_config['dc_range'][0], tier_config['dc_range'][1])
+                        # Also set difficulty label for frontend if needed, though DC is enough
+                    
+                    stat_key = ch['type'].lower()
+                    player_stat = player_stats.get(stat_key, 10)
+                    resolution = game_state_manager.should_require_roll(ch['dc'], player_stat)
+                    ch.update(resolution)
+                
+                game_state_manager.add_quest(session_id, quest_data)
+            else:
+                logger.error(f"Invalid quest offered: {validation_errors}")
         else:
-            logger.error(f"Invalid quest offered: {validation_errors}")
+            logger.warning("quest_offered key present but value is None or empty.")
+
+    # Handle Quest Acceptance
+    if "quest_accepted" in metadata:
+        quest_id = metadata["quest_accepted"]
+        game_state_manager.accept_quest(session_id, quest_id)
+        logger.info(f"Quest accepted: {quest_id}")
 
     # Handle Quest Resolution (Turn-In)
     if "quest_resolved" in metadata:
