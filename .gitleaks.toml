@@ -1,0 +1,94 @@
+# Gitleaks Configuration for Ellie's Repositories
+# Custom patterns to detect common secret formats
+# Based on pre-commit hook patterns
+
+title = "Ellie's Secret Scanning Rules"
+
+# Extended regex patterns to detect secrets
+[[rules]]
+    description = "Generic password assignment"
+    regex = '''(?i)(password|passwd|pwd)\s*[=:]\s*['"][^'"]+['"]'''
+    tags = ["password", "credential"]
+
+[[rules]]
+    description = "API key assignment"
+    regex = '''(?i)(api[_-]?key|apikey)\s*[=:]\s*['"][^'"]+['"]'''
+    tags = ["api-key", "credential"]
+
+[[rules]]
+    description = "Secret assignment"
+    regex = '''(?i)(secret|private[_-]?key)\s*[=:]\s*['"][^'"]+['"]'''
+    tags = ["secret", "credential"]
+
+[[rules]]
+    description = "Token assignment"
+    regex = '''(?i)(token|auth[_-]?token|access[_-]?token)\s*[=:]\s*['"][^'"]+['"]'''
+    tags = ["token", "credential"]
+
+[[rules]]
+    description = "AWS Access Key ID"
+    regex = '''AKIA[0-9A-Z]{16}'''
+    tags = ["aws", "api-key", "credential"]
+
+[[rules]]
+    description = "AWS Secret Access Key"
+    regex = '''[0-9a-zA-Z/+]{40}'''
+    tags = ["aws", "secret", "credential"]
+
+[[rules]]
+    description = "Google API Key"
+    regex = '''AIza[A-Za-z0-9_\-]{35}'''
+    tags = ["google", "api-key", "credential"]
+
+[[rules]]
+    description = "GitHub Personal Access Token"
+    regex = '''ghp_[a-zA-Z0-9]{36}'''
+    tags = ["github", "token", "credential"]
+
+[[rules]]
+    description = "GitHub OAuth Token"
+    regex = '''gho_[a-zA-Z0-9]{36}'''
+    tags = ["github", "oauth", "token", "credential"]
+
+[[rules]]
+    description = "Anthropic API Key"
+    regex = '''am_[a-zA-Z0-9]{64,}'''
+    tags = ["anthropic", "api-key", "credential"]
+
+[[rules]]
+    description = "Stripe API Key"
+    regex = '''sk_[a-zA-Z0-9]{48}'''
+    tags = ["stripe", "api-key", "credential"]
+
+[[rules]]
+    description = "Slack Token"
+    regex = '''xox[boprs]-[0-9]{12}-[0-9]{12}-[0-9]{12}-[a-z0-9]{32}'''
+    tags = ["slack", "token", "credential"]
+
+[[rules]]
+    description = "Moltbook API Key"
+    regex = '''moltbook_sk_[a-zA-Z0-9]{32,}'''
+    tags = ["moltbook", "api-key", "credential"]
+
+# Allowlist - paths to ignore
+[allowlist]
+    paths = [
+        '''\.env\.example$''',
+        '''\.env\.sample$''',
+        '''\.env\.template$''',
+        '''^\.git/''',
+        '''^node_modules/''',
+        '''^venv/''',
+        '''^\.venv/''',
+        '''^\.pytest_cache/''',
+        '''^coverage/''',
+        '''^dist/''',
+        '''^build/''',
+        '''\.lock$''',
+        '''^\.cache/''',
+    ]
+
+    # Allowlist for comments/documentation
+    regexes = [
+        '''(?i)(example|test|demo|dummy|sample|placeholder)\s*=\s*['"]value['"]''',
+    ]
