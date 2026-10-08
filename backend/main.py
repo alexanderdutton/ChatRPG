@@ -16,6 +16,8 @@ from pydantic import BaseModel
 from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world
 from .gemini_service import get_gemini_response, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output
+from .llm_provider import (get_provider, get_provider_mode, override_provider,
+                           ProviderError, LocalOpenAIProvider, GeminiProvider)
 from .gemini_image_generator import generate_and_save_image
 
 # Add the project root to the sys.path
@@ -769,15 +771,80 @@ async def get_npc_portrait(npc_id: str):
     
     success = generate_and_save_image(image_prompt, portrait_path)
     if not success:
-        raise HTTPException(status_code=500,
-                            detail="Error generating or saving portrait.")
-            
+        # Graceful degradation (e.g. local provider has no image generation):
+        # no portrait rather than a hard error the UI would choke on.
+        return {"portrait_url": None,
+                "detail": "Portrait generation unavailable for the active provider."}
+
     return {"portrait_url": f"/portraits/{npc_id}.png"}
 
 @app.get("/health")
 async def health_check():
     logger.info("Health check endpoint hit.")
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Provider / model management
+# ---------------------------------------------------------------------------
+
+async def _provider_status() -> Dict[str, Any]:
+    mode = get_provider_mode()
+    local = LocalOpenAIProvider()
+    gemini = GeminiProvider()
+    local_reachable = await local.is_reachable()
+    active = None
+    if mode == "local" or (mode == "auto" and local_reachable):
+        active = "local"
+    elif mode == "gemini" or gemini.is_configured():
+        active = "gemini"
+    try:
+        current = await get_provider()
+        current_name, current_model = current.name, getattr(current, "model", None)
+    except Exception:
+        current_name, current_model = active, None
+    return {
+        "mode": mode,
+        "active": current_name or active,
+        "model": current_model,
+        "local": {"base_url": local.base_url, "reachable": local_reachable},
+        "gemini_configured": gemini.is_configured(),
+    }
+
+
+@app.get("/api/models")
+async def api_models():
+    """Lists models from the active provider, plus provider status."""
+    status = await _provider_status()
+    models: List[str] = []
+    error = None
+    try:
+        provider = await get_provider()
+        models = await provider.list_models()
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+    return {**status, "models": models, "error": error}
+
+
+@app.get("/api/provider")
+async def api_provider_get():
+    return await _provider_status()
+
+
+class ProviderOverrideInput(BaseModel):
+    provider: Optional[str] = None  # "local" | "gemini" | None (auto from env)
+    model: Optional[str] = None
+
+
+@app.post("/api/provider")
+async def api_provider_set(override: ProviderOverrideInput):
+    """Per-session override: the frontend stores its selection in localStorage
+    and POSTs it here on load/change."""
+    try:
+        override_provider(override.provider, override.model)
+    except ProviderError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await _provider_status()
 
 @app.get("/npc_debug/{session_id}/{npc_id}")
 async def get_npc_debug_info(session_id: str, npc_id: str):

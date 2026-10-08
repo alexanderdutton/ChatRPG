@@ -2,13 +2,24 @@ import os
 import logging
 from PIL import Image
 import io
-from google import genai
-from google.genai import types
 
 logger = logging.getLogger(__name__)
 
 def generate_and_save_image(prompt: str, output_path: str) -> bool:
+    # Portrait generation is Gemini-only. On the local provider, degrade
+    # gracefully (the caller already handles failure) instead of crashing.
     try:
+        from . import llm_provider as lp
+        active = lp._provider
+        if active is not None and getattr(active, "name", "gemini") != "gemini":
+            logger.info("Portrait generation skipped: local LLM provider does not "
+                        "support image generation.")
+            return False
+    except Exception:
+        pass
+    try:
+        from google import genai
+        from google.genai import types
         client = genai.Client()
         
         logger.info(f"Attempting to generate image for prompt: '{prompt}' "

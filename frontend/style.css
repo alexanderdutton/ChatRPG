@@ -1010,3 +1010,26 @@ body {
     overflow-y: auto;
     border-top: 1px solid #333;
 }
+/* Provider picker (header) */
+.provider-picker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.provider-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.12);
+    color: #e0d8c8;
+    white-space: nowrap;
+}
+#model-select {
+    max-width: 160px;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    background: #2a2a35;
+    color: #e0d8c8;
+    border: 1px solid rgba(255,255,255,0.15);
+}

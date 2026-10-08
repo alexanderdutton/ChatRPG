@@ -15,6 +15,10 @@
         <header class="header">
             <h1>ChatRPG: <span id="world-name">Loading...</span></h1>
             <div class="header-controls">
+                <div id="provider-picker" class="provider-picker" title="LLM provider / model">
+                    <span id="provider-badge" class="provider-badge">…</span>
+                    <select id="model-select" onchange="onModelChange(this.value)"></select>
+                </div>
                 <div id="status" class="status-indicator" title="Server Status"></div>
             </div>
         </header>
@@ -207,7 +211,52 @@
         const mainInput = document.getElementById('main-input');
 
         // --- Initialization ---
+        async function initProviderPicker() {
+            try {
+                const res = await fetch('http://localhost:8000/api/models');
+                const data = await res.json();
+                const badge = document.getElementById('provider-badge');
+                const select = document.getElementById('model-select');
+                if (!data.active) { badge.textContent = 'no LLM'; return; }
+                badge.textContent = data.active === 'local' ? 'Local LLM' : 'Gemini';
+                select.innerHTML = '';
+                (data.models || []).forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m; opt.textContent = m;
+                    select.appendChild(opt);
+                });
+                const saved = localStorage.getItem('chatrpg_model');
+                if (saved && [...select.options].some(o => o.value === saved)) {
+                    select.value = saved;
+                } else if (data.model) {
+                    select.value = data.model;
+                }
+                // Re-apply stored selection to the backend for this session.
+                if (select.value) {
+                    await fetch('http://localhost:8000/api/provider', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ provider: data.active, model: select.value })
+                    });
+                }
+            } catch (e) {
+                document.getElementById('provider-badge').textContent = 'LLM ?';
+            }
+        }
+
+        async function onModelChange(model) {
+            localStorage.setItem('chatrpg_model', model);
+            try {
+                await fetch('http://localhost:8000/api/provider', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ model })
+                });
+            } catch (e) { /* server unreachable; selection kept locally */ }
+        }
+
         window.onload = async () => {
+            initProviderPicker();
             if (!sessionId) {
                 const playerName = prompt("Enter your character name:", "Traveler") || "Traveler";
                 const res = await fetchFromServer('/start', { player_name: playerName });

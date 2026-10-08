@@ -22,3 +22,9 @@ error.txt
 
 # Ignore all files in backend/worlds/
 backend/worlds/*
+
+# Server logs / scratch
+server.log*
+temp_*.py
+debug_*.py
+.venv/
