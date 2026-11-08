@@ -17,6 +17,7 @@ from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world, game_world
 from .claims_validation import (add_tool_results,
                                 build_prompt_grounded_set, validate_turn)
+from .write_back import commit_new_entities
 from .gemini_service import get_gemini_response, get_structured_turn, get_structured_turn_with_tools, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
                            ProviderError, LocalOpenAIProvider, GeminiProvider)
@@ -426,10 +427,10 @@ async def interact_with_npc(user_input: UserInput):
     # this turn. Claims are validated against the grounded set; a
     # hard-fact contradiction drops the false claim from the record and
     # queues a [System] correction note, so the NPC can self-correct
-    # in character next turn. New names are recorded as proposals, not
-    # committed — committing them to the world is the next slice's
-    # write-back work. Memory notes append to the NPC's memory here;
-    # the leave-time call stays as the consolidator that rewrites
+    # in character next turn. New names are recorded as proposals, and
+    # the write-back below (slice 5, §22) commits the structured ones
+    # — canon with provenance. Memory notes append to the NPC's memory
+    # here; the leave-time call stays as the consolidator that rewrites
     # memory and greetings from the full conversation.
     grounded = add_tool_results(grounded, tool_calls_made)
     validation = validate_turn(turn, grounded,
@@ -455,10 +456,26 @@ async def interact_with_npc(user_input: UserInput):
         logger.info(
             "New entities proposed (not yet committed): "
             f"{validation.proposals}")
-    if turn.new_entities:
-        logger.info(
-            "New entities proposed (not yet committed): "
-            f"{[e.name for e in turn.new_entities]}")
+    # Write-back, slice 5 (§22): commit this turn's proposed new
+    # entities into the world — canon with provenance — after
+    # validation, so a proposal can never ground its own claims.
+    # The turn number is the count of the NPC's earlier turns here.
+    turn_number = (
+        sum(1 for m in conversation_history if m.get("role") == "model") + 1
+    )
+    write_back = commit_new_entities(
+        turn,
+        session_id=session_id,
+        npc_name=npc_info["name"],
+        player_message=user_input.message,
+        current_location=game_state_manager.get_current_location_name(
+            session_id),
+        npc_x=npc_info.get("x", 0),
+        npc_y=npc_info.get("y", 0),
+        turn_number=turn_number,
+    )
+    metadata["write_back"] = write_back.to_dict()
+    logger.info(f"Write-back: {write_back.summary()}")
     if turn.referrals:
         logger.info(
             f"Referrals: {[(r.to_name, r.reason) for r in turn.referrals]}")

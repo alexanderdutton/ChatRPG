@@ -48,6 +48,10 @@ class Quest(BaseModel):
     challenges: List[Challenge] = []
 
 class Character(BaseModel):
+    # `id` and `provenance` are engine-set at commit time (slice 5,
+    # write-back, §22). Shipped entities keep both as None and their
+    # name as the key, so the world file is backward compatible.
+    id: Optional[str] = None
     name: str
     race: str
     occupation: str
@@ -57,8 +61,11 @@ class Character(BaseModel):
     x: int
     y: int
     short_description: str = Field(..., description="A brief, one-sentence description of the character for quick reference.")
+    provenance: Optional[Dict[str, Any]] = None
 
 class Location(BaseModel):
+    # See Character: `id` and `provenance` are engine-set at commit.
+    id: Optional[str] = None
     name: str
     description: str
     raw_layout: List[str]
@@ -67,6 +74,7 @@ class Location(BaseModel):
     exits: Dict[str, str] = {}
     features: List[Feature] = []
     characters: List[Character] = []
+    provenance: Optional[Dict[str, Any]] = None
 
 class GameWorldData(BaseModel):
     world: str
