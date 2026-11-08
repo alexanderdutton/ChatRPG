@@ -224,3 +224,20 @@ def test_gemini_provider_not_configured_without_key(monkeypatch):
     assert g.is_configured() is False
     with pytest.raises(ProviderError):
         g._get_client()
+
+
+# ---------------------------------------------------------------------------
+# Regression: constructing the provider must not depend on the sandbox's
+# proxy environment. This VM's NO_PROXY lists [::1], which httpx 0.28.1
+# misparses (InvalidURL "Invalid port: ':1]'") when AsyncClient reads the
+# environment — so construction raised before any request was made, and
+# six tests in this file failed at setup. trust_env=False keeps the
+# client from reading the environment at all.
+# ---------------------------------------------------------------------------
+
+def test_local_provider_constructs_despite_proxy_env():
+    provider = LocalOpenAIProvider(base_url="http://127.0.0.1:11434/v1",
+                                   model="tiny-1b")
+    assert provider.base_url == "http://127.0.0.1:11434/v1"
+    assert provider.model == "tiny-1b"
+    asyncio.run(provider._client.aclose())
