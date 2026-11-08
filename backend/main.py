@@ -14,8 +14,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .game_state_manager import GameStateManager
-from .game_world import initialize_game_world
-from .gemini_service import get_gemini_response, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output
+from .game_world import initialize_game_world, game_world
+from .gemini_service import get_gemini_response, get_structured_turn, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
                            ProviderError, LocalOpenAIProvider, GeminiProvider)
 from .gemini_image_generator import generate_and_save_image
@@ -130,6 +130,113 @@ class NPCResponse(BaseModel):
 
 # --- API Endpoints ---
 
+def build_system_instruction(session_id: str, npc_id: str) -> str:
+    """Assemble the system instruction for a conversation turn (slice 1).
+
+    Kept as a standalone function so the verification rig (and tests)
+    can build the exact prompt the game sends, instead of
+    reconstructing it by hand.
+    """
+    npc_info = game_state_manager.get_npc_info(npc_id)
+    npc_state = game_state_manager.get_npc_state(session_id, npc_id)
+    npc_memory = npc_state.get("memory", [])
+    conversation_history = game_state_manager.get_conversation_history(session_id)
+    # Add personality prompt as system instruction
+    player_name = game_state_manager.get_player_name(session_id)
+    location_desc = game_state_manager.get_current_location_description(session_id)
+
+    location_context = f"You are in {location_desc['location_description']}."
+    if location_desc.get('current_feature_description'):
+        location_context += f" The player is standing at: {location_desc['current_feature_description']}."
+    
+    # Inject Memory
+    memory_context = ""
+    if npc_memory:
+        memory_context = f"Memories of {player_name}: {json.dumps(npc_memory)}"
+
+    # Inject Challenge System Prompt
+    player_stats = game_state_manager.get_player_stats(session_id)
+    npc_state = game_state_manager.get_npc_state(session_id, npc_id)
+
+    # Determine failure severity from recent history
+    failure_severity = "None"
+    if conversation_history and conversation_history[-1]["role"] == "user":
+        last_msg = conversation_history[-1]["parts"][0]
+        if "[System]" in last_msg and "Severity:" in last_msg:
+            import re
+            match = re.search(r"Severity: (\w+)", last_msg)
+            if match:
+                failure_severity = match.group(1)
+
+    # Get Resource Info
+    from .game_state_manager import NPC_RESOURCE_LEVELS
+    resource_level_key = npc_info.get("resource_level", "poor")
+    resource_config = NPC_RESOURCE_LEVELS.get(resource_level_key, NPC_RESOURCE_LEVELS["poor"])
+
+    # Bindings: what is true here (slice 1 grounding). The engine holds the
+    # map, the exits, and who is standing where; the model speaks from
+    # them instead of re-deriving them from a prose line.
+    current_location_name = game_state_manager.get_current_location_name(session_id)
+    location_obj = game_world.get_location(current_location_name)
+    npc_x = npc_state.get("x")
+    npc_y = npc_state.get("y")
+    bindings_parts = [f"You are {npc_info['name']}, in {current_location_name}"]
+    if npc_x is not None and npc_y is not None:
+        bindings_parts[0] += f" at ({npc_x}, {npc_y})"
+    bindings_parts[0] += "."
+    bindings_parts.append(f"The player is in {current_location_name} with you.")
+    if location_obj is not None:
+        exits = [f"{d} to {dest}" for d, dest in location_obj.exits.items() if dest]
+        bindings_parts.append(
+            f"Exits from here: {', '.join(exits)}." if exits
+            else "There are no exits from here.")
+        if location_obj.features:
+            bindings_parts.append(
+                "Features here: " + ", ".join(f.name for f in location_obj.features) + ".")
+        others = [c for c in location_obj.characters if c.name != npc_info['name']]
+        if others:
+            bindings_parts.append(
+                "Others here: " + ", ".join(f"{c.name} ({c.x}, {c.y})" for c in others) + ".")
+    bindings = " ".join(bindings_parts)
+
+    # Rollable band per stat, so the model proposes checks that get rolled:
+    # below the band they succeed on their own, above it they cannot be
+    # attempted at all.
+    rollable_parts = []
+    for stat_name in ("strength", "dexterity", "intelligence", "charisma"):
+        lo, hi = game_state_manager.rollable_dc_band(player_stats.get(stat_name, 10))
+        rollable_parts.append(f"{stat_name} {lo}-{hi}")
+    rollable_band = (
+        "Checks only get rolled inside these DC bands for this player "
+        "(below the band they succeed on their own, above it they cannot "
+        "be attempted): " + ", ".join(rollable_parts) + "."
+    )
+
+    challenge_prompt = CHALLENGE_SYSTEM_PROMPT.format(
+        player_stats=json.dumps(player_stats),
+        npc_state=json.dumps(npc_state),
+        failure_severity=failure_severity,
+        resource_level=resource_level_key,
+        can_offer=", ".join(resource_config["can_offer"]),
+        cannot_offer=", ".join(resource_config.get("cannot_offer", [])),
+        bindings=bindings,
+        rollable_band=rollable_band
+    )
+
+    # Inject Quest History (Active/Completed/Failed only)
+    quest_history = game_state_manager.get_quest_context_for_npc(session_id)
+    quest_context = f"Quest Log (Active & Completed): {json.dumps(quest_history)}"
+
+    system_instruction = (f"You are {npc_info['name']}. "
+                          f"You are talking to {player_name}. "
+                          f"{location_context} "
+                          f"{npc_info['personality_prompt']} "
+                          f"{memory_context} "
+                          f"{quest_context} "
+                          f"{challenge_prompt}")
+    return system_instruction
+
+
 @app.post("/interact", response_model=NPCResponse)
 async def interact_with_npc(user_input: UserInput):
     logger.info(f"Received user input: {user_input.dict()}")
@@ -206,68 +313,31 @@ async def interact_with_npc(user_input: UserInput):
             npcs_in_location=game_state_manager.get_npcs_in_location(session_id)
         )
 
-    # Add personality prompt as system instruction
-    player_name = game_state_manager.get_player_name(session_id)
-    location_desc = game_state_manager.get_current_location_description(session_id)
-    
-    location_context = f"You are in {location_desc['location_description']}."
-    if location_desc.get('current_feature_description'):
-        location_context += f" The player is standing at: {location_desc['current_feature_description']}."
-        
-    # Inject Memory
-    memory_context = ""
-    if npc_memory:
-        memory_context = f"Memories of {player_name}: {json.dumps(npc_memory)}"
-
-    # Inject Challenge System Prompt
-    player_stats = game_state_manager.get_player_stats(session_id)
-    npc_state = game_state_manager.get_npc_state(session_id, npc_id)
-    
-    # Determine failure severity from recent history
-    failure_severity = "None"
-    if conversation_history and conversation_history[-1]["role"] == "user":
-        last_msg = conversation_history[-1]["parts"][0]
-        if "[System]" in last_msg and "Severity:" in last_msg:
-            import re
-            match = re.search(r"Severity: (\w+)", last_msg)
-            if match:
-                failure_severity = match.group(1)
-
-    # Get Resource Info
-    from .game_state_manager import NPC_RESOURCE_LEVELS
-    resource_level_key = npc_info.get("resource_level", "poor")
-    resource_config = NPC_RESOURCE_LEVELS.get(resource_level_key, NPC_RESOURCE_LEVELS["poor"])
-
-    challenge_prompt = CHALLENGE_SYSTEM_PROMPT.format(
-        player_stats=json.dumps(player_stats),
-        npc_state=json.dumps(npc_state),
-        failure_severity=failure_severity,
-        resource_level=resource_level_key,
-        can_offer=", ".join(resource_config["can_offer"]),
-        cannot_offer=", ".join(resource_config.get("cannot_offer", []))
-    )
-
-    # Inject Quest History (Active/Completed/Failed only)
-    quest_history = game_state_manager.get_quest_context_for_npc(session_id)
-    quest_context = f"Quest Log (Active & Completed): {json.dumps(quest_history)}"
-
-    system_instruction = (f"You are {npc_info['name']}. "
-                          f"You are talking to {player_name}. "
-                          f"{location_context} "
-                          f"{npc_info['personality_prompt']} "
-                          f"{memory_context} "
-                          f"{quest_context} "
-                          f"{challenge_prompt}")
+    system_instruction = build_system_instruction(session_id, npc_id)
 
     conversation_history.append({"role": "user", "parts": [user_input.message]})
     logger.info(f"Conversation history after adding user message: {conversation_history}")
 
-    # Get response from Gemini
+    # One structured turn (slice 1): JSON mode + Pydantic validation.
+    # Falls back to dialogue-only if the turn fails validation.
     logger.info("Calling Gemini API...")
-    gemini_dialogue, metadata = await get_gemini_response(conversation_history,
-                                                            system_instruction=system_instruction)
+    turn = await get_structured_turn(conversation_history,
+                                     system_instruction=system_instruction)
+    gemini_dialogue = turn.dialogue
+    metadata = turn.model_dump(mode="json", exclude_none=True)
     logger.info(f"Received Gemini dialogue: {gemini_dialogue}")
     logger.info(f"Received Gemini metadata: {metadata}")
+
+    # Skill check: validate the proposal, then the engine computes the DC
+    # from the difficulty label. A bad proposal is dropped, not played.
+    if metadata.get("skill_check"):
+        sc_errors = validate_skill_check_proposal(metadata["skill_check"])
+        if sc_errors:
+            logger.warning(f"Dropping invalid skill check: {sc_errors}")
+            metadata.pop("skill_check")
+        else:
+            metadata["skill_check"]["dc"] = assign_dc(
+                difficulty=metadata["skill_check"].get("difficulty"))
     
     # Handle Quest Offer
     if "quest_offered" in metadata:
@@ -297,21 +367,21 @@ async def interact_with_npc(user_input: UserInput):
                 
                 logger.info(f"Valid quest offered: {quest_data['id']}")
                 
-                # Inject difficulty info for frontend display
+                # Engine assigns every DC (slice 1): the model proposes a
+                # tier or a difficulty label, never a number.
                 player_stats = game_state_manager.get_player_stats(session_id)
                 for ch in quest_data.get('challenges', []):
-                    # Tier-based DC Assignment
-                    if 'tier' in ch:
-                        tier_config = game_state_manager.get_tier_config(ch['tier'])
-                        import random
-                        ch['dc'] = random.randint(tier_config['dc_range'][0], tier_config['dc_range'][1])
-                        # Also set difficulty label for frontend if needed, though DC is enough
-                    
+                    ch['dc'] = assign_dc(tier=ch.get('tier'),
+                                         difficulty=ch.get('difficulty'))
+                    ch['quest_id'] = quest_data['id']
+
                     stat_key = ch['type'].lower()
                     player_stat = player_stats.get(stat_key, 10)
                     resolution = game_state_manager.should_require_roll(ch['dc'], player_stat)
                     ch.update(resolution)
                 
+                # The engine knows the giver; the model may omit it.
+                quest_data.setdefault('giver_npc', npc_info['name'])
                 game_state_manager.add_quest(session_id, quest_data)
             else:
                 logger.error(f"Invalid quest offered: {validation_errors}")
@@ -321,14 +391,53 @@ async def interact_with_npc(user_input: UserInput):
     # Handle Quest Acceptance
     if "quest_accepted" in metadata:
         quest_id = metadata["quest_accepted"]
-        game_state_manager.accept_quest(session_id, quest_id)
-        logger.info(f"Quest accepted: {quest_id}")
+        accepted = game_state_manager.accept_quest(session_id, quest_id)
+        if accepted is None:
+            logger.warning(
+                f"Quest accepted {quest_id!r} was never added in this "
+                "session; nothing was activated.")
+        else:
+            logger.info(f"Quest accepted: {quest_id}")
 
     # Handle Quest Resolution (Turn-In)
     if "quest_resolved" in metadata:
         quest_id = metadata["quest_resolved"]
         logger.info(f"Quest resolved (turned in): {quest_id}")
         game_state_manager.resolve_quest(session_id, quest_id)
+
+    # Turn extras, slice 1: collect and log. Claims are checked against
+    # known names (locations, characters, NPCs in this session) and
+    # mismatches are logged, not enforced — enforcement is a later slice.
+    # New entities and referrals are logged for now; committing them to
+    # the world is the next slice's write-back work. Memory notes append
+    # to the NPC's memory here; the leave-time call stays as the
+    # consolidator that rewrites memory and greetings from the full
+    # conversation.
+    known_names = {loc.name.lower() for loc in game_world.locations.values()}
+    known_names |= {c.name.lower() for loc in game_world.locations.values()
+                    for c in loc.characters}
+    for claim in turn.claims:
+        subject = (claim.subject or "").lower()
+        if subject and subject not in known_names:
+            logger.warning(
+                f"Claim names unknown entity: {claim.text!r} "
+                f"(subject {claim.subject!r}, kind {claim.kind})")
+        else:
+            logger.info(f"Claim ({claim.kind}): {claim.text}")
+    if turn.new_entities:
+        logger.info(
+            "New entities proposed (not yet committed): "
+            f"{[e.name for e in turn.new_entities]}")
+    if turn.referrals:
+        logger.info(
+            f"Referrals: {[(r.to_name, r.reason) for r in turn.referrals]}")
+    if turn.memory_update:
+        memory = list(npc_state.get("memory", []))
+        for note in turn.memory_update:
+            if note and note not in memory:
+                memory.append(note)
+        game_state_manager.update_npc_state(session_id, npc_id, {"memory": memory})
+        logger.info(f"Memory updated for {npc_info['name']}: {turn.memory_update}")
 
     game_state_manager.process_metadata(session_id, metadata)
     conversation_history.append({"role": "model", "parts": [gemini_dialogue]})
@@ -416,10 +525,13 @@ class SkillCheckInput(BaseModel):
 async def resolve_skill_check_endpoint(input: SkillCheckInput):
     logger.info(f"Resolving skill check: {input.description} (DC {input.dc} {input.type})")
     
-    # Get Stats
+    # Get Stats. The roll adds the modifier, (stat - 10) // 2 — not the raw
+    # stat, which made a fresh character pass a medium check on a roll of
+    # 5+ (80%). The auto-resolution band still uses the raw stat.
     stats = game_state_manager.get_player_stats(input.session_id)
-    stat_bonus = stats.get(input.type.lower(), 0)
-    
+    player_stat = stats.get(input.type.lower(), 10)
+    stat_bonus = (player_stat - 10) // 2
+
     import random
     roll = random.randint(1, 20)
     total = roll + stat_bonus
@@ -498,12 +610,15 @@ class QuestDecisionInput(BaseModel):
 async def accept_quest_endpoint(input: QuestDecisionInput):
     logger.info(f"Accepting quest: {input.quest_id} for session {input.session_id}")
     response_text = game_state_manager.accept_quest(input.session_id, input.quest_id)
-    
+    if response_text is None:
+        return {"status": "error",
+                "message": f"Quest {input.quest_id} was never offered in this session."}
+
     # Update conversation history so NPC remembers saying this
     history = game_state_manager.get_conversation_history(input.session_id)
     history.append({"role": "model", "parts": [response_text]})
     game_state_manager.update_conversation_history(input.session_id, history)
-    
+
     return {"status": "success", "message": "Quest accepted", "npc_response": response_text}
 
 @app.post("/refuse_quest")

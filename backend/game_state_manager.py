@@ -1,9 +1,9 @@
 import sqlite3
 import json
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from .game_world import game_world
-from .gemini_service import generate_item_details, generate_quest
+from .gemini_service import generate_item_details, generate_quest, DIFFICULTY_TABLE
 import logging
 
 logger = logging.getLogger(__name__)
@@ -340,10 +340,28 @@ class GameStateManager:
         logger.info(f"Updated relationship with {npc_name}: {current_relationship} -> {new_relationship} (Modifier: {modifier})")
 
     def get_tier_config(self, tier_name: str) -> Dict[str, Any]:
-        """Retrieves configuration for a specific entity tier."""
-        # Handle new tier names and backward compatibility
-        mapped_tier = TIER_MAPPING.get(tier_name.lower(), tier_name.lower())
-        return VALUE_TIERS.get(mapped_tier, VALUE_TIERS["tier_1_minor"])
+        """Retrieves configuration for a specific entity tier.
+
+        The DC range comes from the single difficulty table
+        (gemini_service.DIFFICULTY_TABLE); XP, gold, and items still come
+        from VALUE_TIERS. Before slice 1 this returned a VALUE_TIERS entry
+        directly, which has no "dc_range" key — the test expecting one
+        failed, and main.py read the range from a different table.
+        """
+        key = tier_name.lower()
+        if key not in DIFFICULTY_TABLE:
+            key = "average"
+        mapped_tier = TIER_MAPPING.get(key, "tier_1_minor")
+        config = dict(VALUE_TIERS.get(mapped_tier, VALUE_TIERS["tier_1_minor"]))
+        config["dc_range"] = DIFFICULTY_TABLE[key]["dc_range"]
+        return config
+
+    def rollable_dc_band(self, player_stat: int) -> Tuple[int, int]:
+        """The DCs that get rolled for a stat (should_require_roll's band):
+        DC <= stat-5 auto-succeeds, DC >= stat+10 auto-fails, so only
+        stat-4 .. stat+9 ever reach the dice. The engine hands this band
+        to the model so it proposes checks inside it."""
+        return (player_stat - 4, player_stat + 9)
 
     def calculate_quest_rewards(self, quest_tier: str, npc_profile: Dict[str, Any], relationship: int) -> Dict[str, Any]:
         """
@@ -1153,10 +1171,10 @@ class GameStateManager:
             INSERT OR REPLACE INTO quests (id, session_id, giver_npc, description, status, involved_entities, accept_response, refuse_response)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            quest_data['id'], 
-            session_id, 
-            quest_data['giver_npc'], 
-            quest_data['description'], 
+            quest_data['id'],
+            session_id,
+            quest_data.get('giver_npc', ''),
+            quest_data['description'],
             quest_data.get('status', 'offered'), # Use provided status or default to offered
             json.dumps(quest_data.get('involved_entities', [])),
             quest_data.get('accept_response', "I'm glad you accepted."),
@@ -1192,26 +1210,39 @@ class GameStateManager:
         conn.close()
         return [row[0] for row in rows]
 
-    def accept_quest(self, session_id: str, quest_id: str) -> str:
-        """Updates quest status to 'active' and returns accept response."""
+    def accept_quest(self, session_id: str, quest_id: str) -> Optional[str]:
+        """Updates quest status to 'active' and returns accept response.
+
+        Returns None when there is no such quest for this session — which
+        used to silently do nothing (the UPDATE affected zero rows while
+        the caller went on as if the quest had been accepted). Accepting a
+        quest that was never added is now reported, not swallowed.
+        """
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         # Get response text
         cursor.execute("SELECT accept_response FROM quests WHERE id = ? AND session_id = ?", (quest_id, session_id))
         row = cursor.fetchone()
-        response_text = row['accept_response'] if row and row['accept_response'] else "Quest accepted."
-        
+        if not row:
+            logger.warning(
+                f"accept_quest: no quest {quest_id!r} for session {session_id}; "
+                "nothing activated (the quest was never added)."
+            )
+            conn.close()
+            return None
+        response_text = row['accept_response'] if row['accept_response'] else "Quest accepted."
+
         cursor.execute("UPDATE quests SET status = 'active' WHERE id = ? AND session_id = ?", (quest_id, session_id))
         conn.commit()
         conn.close()
-        
+
         # Update Relationship
         giver = self.get_quest_giver(session_id, quest_id)
         if giver:
             self.update_relationship(session_id, giver, "quest_accepted")
-            
+
         return response_text
 
     def refuse_quest(self, session_id: str, quest_id: str) -> str:
@@ -1343,16 +1374,17 @@ class GameStateManager:
             
         challenge = dict(challenge_row)
         
-        # Get Stats
+        # Get Stats. Two different numbers, kept separate: the raw stat
+        # decides whether a roll happens at all (should_require_roll's
+        # band), while the roll itself adds the modifier, (stat - 10) // 2.
+        # Conflating them made a fresh character pass a medium check on a
+        # roll of 5+ (80%) — the dice barely mattered inside the band.
         stats = self.get_player_stats(session_id)
-        stat_bonus = stats.get(challenge['type'].lower(), 0) # Raw score as bonus for now, or (score-10)//2
-        # User said: "Success Threshold (dice roll + stat vs. DC)" - implying raw stat? 
-        # "strength: 5" in example. D&D usually is modifier. 
-        # But user example: "strength": 5. 
-        # Let's assume raw stat for simplicity as per user prompt "roll(1d20) + player.stats[challenge_type]".
-        
-        # Auto-Resolution Check
-        auto_check = self.should_require_roll(challenge['dc'], stat_bonus)
+        player_stat = stats.get(challenge['type'].lower(), 10)
+        stat_bonus = (player_stat - 10) // 2
+
+        # Auto-Resolution Check (raw stat, not the modifier)
+        auto_check = self.should_require_roll(challenge['dc'], player_stat)
         
         if not auto_check['requires_roll']:
             success = auto_check['outcome'] == 'auto_success'
@@ -1446,9 +1478,17 @@ class GameStateManager:
             new_status = 'failed' if any_failure else 'completed'
             cursor.execute("UPDATE quests SET status = ? WHERE id = ?", (new_status, quest_id))
             conn.commit()
-            
+
+        # A severe failure makes the giver abandon the quest: the prompt's
+        # failing-forward rules promise the quest is marked "withdrawn",
+        # and until slice 1 that status did not exist anywhere in the
+        # engine. Applied last so it wins over the completed/failed update.
+        if result.get("severity") == "severe":
+            cursor.execute("UPDATE quests SET status = 'withdrawn' WHERE id = ?", (quest_id,))
+            conn.commit()
+
         conn.close()
-        
+
         return result
 
     def process_involved_entities(self, session_id: str, entities: List[str]):

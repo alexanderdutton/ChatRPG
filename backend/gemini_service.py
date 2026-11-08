@@ -1,9 +1,10 @@
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 import logging
 import json
+import random
 import re
 
-from .models import GameWorldData
+from .models import GameWorldData, TurnResponse
 from .llm_provider import generate_llm_response
 from pydantic import ValidationError
 
@@ -226,23 +227,64 @@ You do NOT reward creativity with mechanical success.
 Creativity gets narrative flavor, not rule-breaking.
 """
 
-ENTITY_TIER_DESCRIPTIONS = """
-ENTITY TIERS (Use these to gauge difficulty):
-- Trivial: Rats, drunk peasants, children. No real threat. (DC 5-8)
-- Average: Town guards, wild animals, common bandits. Fair fight. (DC 10-12)
-- Tough: Veteran soldiers, dire wolves, skilled duelists. Challenging. (DC 15-17)
-- Elite: Champion fighters, young dragons, master assassins. Requires prep. (DC 18-20)
-- Boss: Warlords, ancient dragons, demon lords. Major climax. (DC 22-25)
-- Legendary: Gods, apocalyptic threats. Campaign defining. (DC 26-30)
-"""
+# The single difficulty table (slice 1). The prompt, the validator, and the
+# resolver all read from here — there was one table too many before this:
+# entity tiers with DC ranges, value tiers with the same ranges under
+# different names, and easy/medium/hard/heroic with fixed DCs that
+# disagreed with both (DC 15 was "medium" in one vocabulary and "tough"
+# in another). One table now. Labels map onto tier bands; trivial and
+# legendary are tier-only, with no label.
+DIFFICULTY_TABLE = {
+    "trivial":   {"dc_range": (5, 8),   "label": None,       "examples": "Rats, drunk peasants, children. No real threat."},
+    "average":   {"dc_range": (10, 12), "label": "easy",     "examples": "Town guards, wild animals, common bandits. Fair fight."},
+    "tough":     {"dc_range": (15, 17), "label": "medium",   "examples": "Veteran soldiers, dire wolves, skilled duelists. Challenging."},
+    "elite":     {"dc_range": (18, 20), "label": "hard",     "examples": "Champion fighters, young dragons, master assassins. Requires prep."},
+    "boss":      {"dc_range": (22, 25), "label": "heroic",   "examples": "Warlords, ancient dragons, demon lords. Major climax."},
+    "legendary": {"dc_range": (26, 30), "label": None,       "examples": "Gods, apocalyptic threats. Campaign defining."},
+}
+DIFFICULTY_LABEL_TO_TIER = {
+    entry["label"]: tier
+    for tier, entry in DIFFICULTY_TABLE.items()
+    if entry["label"] is not None
+}
+CHALLENGE_TYPES = ["strength", "dexterity", "intelligence", "charisma"]
+
+
+def assign_dc(tier: Optional[str] = None, difficulty: Optional[str] = None,
+              modifiers: Optional[List[int]] = None) -> int:
+    """The engine owns the DC. The model proposes a tier or a difficulty
+    label; the engine rolls inside the tier's band and applies integer
+    modifiers (knowledge, relationship, approach — summed). The model
+    never writes a DC."""
+    if tier is None and difficulty is not None:
+        tier = DIFFICULTY_LABEL_TO_TIER.get(difficulty)
+    if tier is None or tier not in DIFFICULTY_TABLE:
+        tier = "average"
+    lo, hi = DIFFICULTY_TABLE[tier]["dc_range"]
+    dc = random.randint(lo, hi)
+    if modifiers:
+        dc += sum(modifiers)
+    return max(1, dc)
+
+
+def _tier_descriptions() -> str:
+    lines = ["ENTITY TIERS (Use these to gauge difficulty):"]
+    for tier, entry in DIFFICULTY_TABLE.items():
+        lo, hi = entry["dc_range"]
+        label = f" (label: {entry['label']})" if entry["label"] else ""
+        lines.append(f"- {tier.capitalize()}: {entry['examples']} (DC {lo}-{hi}){label}")
+    return "\n".join(lines) + "\n"
+
+
+ENTITY_TIER_DESCRIPTIONS = _tier_descriptions()
 
 QUEST_REWARD_RULES = """
 QUEST REWARD SYSTEM:
 
 NPC RESOURCE PROFILE:
-- Resource Level: {{resource_level}}
-- Can Offer: {{can_offer}}
-- Cannot Offer: {{cannot_offer}}
+- Resource Level: {resource_level}
+- Can Offer: {can_offer}
+- Cannot Offer: {cannot_offer}
 
 REWARD RULES:
 1. XP is automatic based on Tier (do not mention specific XP amounts).
@@ -258,8 +300,9 @@ TIER REFERENCE (Gold Ranges):
 - Tier 4 (Major): 500-1000 gold
 - Tier 5 (Legendary): 2000-5000 gold
 
-When offering a quest, generate a JSON with "quest_offered" containing "rewards" object with "gold" (int) and "items" (list of strings).
-When the player accepts a quest, generate a JSON with "quest_accepted": "quest_id".
+When offering a quest, put "rewards" inside "quest_offered" in the single
+turn JSON, as an object with "gold" (int) and "items" (list of strings).
+When the player accepts a quest, set "quest_accepted" to the quest id.
 IMPORTANT: When accepting, DO NOT just say "Quest Accepted". Write a natural response from the NPC (e.g., "Excellent! I knew I could count on you," or "Thank you. Here are the details...").
 """
 
@@ -318,6 +361,15 @@ CHALLENGE_SYSTEM_PROMPT = """
 {ENTITY_TIER_DESCRIPTIONS}
 
 {QUEST_REWARD_RULES}
+
+WHERE YOU ARE — WHAT IS TRUE HERE (the engine's bindings, not your memory):
+{bindings}
+
+Use these bindings when you talk about the world. The map, the exits, and who is standing where are facts the engine holds; your job is to speak from them, not to re-derive them. If the player asks about a place or a person that is not in these bindings, say what you know honestly — or say you do not know — and list it in "referrals" or "new_entities" in your turn JSON rather than inventing details in passing.
+
+WHAT YOU CAN ASK OF THIS PLAYER (rollable checks):
+{rollable_band}
+A check only gets rolled if its DC falls inside the band for that stat; below the band it succeeds on its own, above it it cannot be attempted. Propose checks inside the band.
 
 QUEST GENERATION RULES:
 IMPORTANT: Not every conversation needs a quest!
@@ -380,24 +432,33 @@ NEVER respond with:
 Current failure severity: {failure_severity}
 
 CHALLENGE GENERATION FORMAT:
-When the player asks for a quest or you determine the NPC has a task:
+When the player asks for a quest or you determine the NPC has a task, put it in the turn JSON (see THE TURN below).
 
-1. Create a JSON object with "quest_offered".
-2. "challenges" is a list of steps.
-3. "tier" MUST be one of: trivial, average, tough, elite, boss, legendary.
+1. "challenges" is a list of steps.
+2. "tier" MUST be one of: trivial, average, tough, elite, boss, legendary. Give a tier per challenge. NEVER write a "dc" — the engine assigns the DC (a random roll inside the tier's band). A challenge you write without a DC is correct; a challenge with one will have it overwritten.
+3. Choose the challenge type by the nature of the step:
+   - strength: Physical force, combat, breaking things
+   - dexterity: Stealth, agility, precision
+   - intelligence: Puzzles, knowledge, investigation
+   - charisma: Persuasion, deception, social interaction
+4. ONLY include entities that are:
+   - Already established in the world
+   - OR being introduced by this quest (mark in involved_entities)
+
+Example (note the lowercase type, the tier, and no "dc" anywhere):
 
 {{
     "quest_offered": {{
         "id": "quest_id_snake_case",
         "description": "Brief description of the task.",
-        "giver_npc": "{{npc_name}}",
-        "tier": "average", 
+        "giver_npc": "Your name",
+        "tier": "average",
         "accept_response": "Great, I knew I could count on you.",
         "refuse_response": "A pity. I'll find someone else.",
         "challenges": [
             {{
                 "id": "challenge_id_snake_case",
-                "type": "Strength",
+                "type": "strength",
                 "tier": "average",
                 "description": "Lift the heavy beam."
             }}
@@ -406,22 +467,32 @@ When the player asks for a quest or you determine the NPC has a task:
     }}
 }}
 
+THE TURN — YOUR WHOLE REPLY IS ONE JSON OBJECT:
+{{
+    "dialogue": "What you say to the player, in character.",
+    "quest_offered": {{ ... }} (only when offering a quest, as above),
+    "quest_accepted": "quest_id" (only when the player accepts a quest),
+    "quest_resolved": "quest_id" (only when the player explicitly reports completing a quest to you),
+    "skill_check": {{ (only when the conversation calls for an immediate check)
+        "type": "charisma",
+        "difficulty": "medium",
+        "description": "Persuade the guard to let you pass.",
+        "success_response": "Very well, you make a compelling point.",
+        "failure_response": "I don't think so. Move along."
+    }},
+    "new_entities": [ {{ "kind": "character", "name": "Joren", "description": "A trapper who has seen the man.", "location": "Oakhaven" }} ] (only for people, places, or things you invented that are not in the world yet; "kind" is one of "character", "location", "item", "other" — use "other" for anything that is not clearly one of the first three, such as a plant or a substance),
+    "referrals": [ {{ "to_name": "Joren", "to_kind": "person", "reason": "He has seen the man." }} ] (only when you send the player to someone more knowledgeable; "to_kind" is "person" or "place"),
+    "claims": [ {{ "text": "Corvin camps in the Whispering Woods.", "kind": "fact", "subject": "Corvin" }} ] (every factual claim you made in your dialogue, each marked "fact", "inference", or "rumor"),
+    "memory_update": ["The player promised to help with the moonpetal."] (only short facts worth remembering about this player)
+}}
 
-2. Difficulty to DC mapping:
-   - easy: DC 10
-   - medium: DC 15
-   - hard: DC 20
-   - heroic: DC 25
-
-3. Choose challenge_type based on the quest nature:
-   - strength: Physical force, combat, breaking things
-   - dexterity: Stealth, agility, precision
-   - intelligence: Puzzles, knowledge, investigation
-   - charisma: Persuasion, deception, social interaction
-
-4. ONLY include entities that are:
-   - Already established in the world
-   - OR being introduced by this quest (mark in involved_entities)
+Rules for the turn JSON:
+- "dialogue" is always present. Every other field is optional — include it only when it applies.
+- For "skill_check": give a difficulty label only — "easy", "medium", "hard", or "heroic" (easy = average band, medium = tough, hard = elite, heroic = boss). NEVER write a "dc" — the engine computes it.
+- For "claims": list what you asserted in your dialogue. Mark it "fact" if you stated it as true, "inference" if you reasoned it from what you know, "rumor" if you heard it secondhand. If you are not sure of something, say so in character and mark it "rumor".
+- For "referrals": if you do not know something and you know who would, send the player there instead of guessing.
+- For "new_entities": only things you invented in this turn. Never list anything already in the world. "kind" must be one of "character", "location", "item", "other".
+- For "quest_resolved": ONLY when the player explicitly reports completion to you.
 
 CURRENT PLAYER STATS:
 {player_stats}
@@ -429,54 +500,111 @@ CURRENT PLAYER STATS:
 CURRENT NPC STATE:
 {npc_state}
 
-IMPORTANT: Do not invent new attributes for existing entities. 
-Stick to established facts from the world data.
+IMPORTANT: Do not invent new attributes for existing entities.
+Stick to established facts from the world data. Name only places and people that are in the bindings above, that you were told about in this conversation, or that you list in "new_entities" — never invent a place or a person in passing and leave it unlisted.
 
-- **quest_resolved**: (Optional) The ID of a quest that the player has successfully turned in or resolved during this interaction. Use this ONLY when the player explicitly reports completion to the quest giver.
-
-- **skill_check**: (Optional) A JSON object representing an immediate skill check during conversation.
-    - **type**: One of "strength", "dexterity", "intelligence", "charisma".
-    - **difficulty**: "easy" (DC 10), "medium" (DC 15), "hard" (DC 20), "heroic" (DC 25).
-    - **dc**: The Difficulty Class integer.
-    - **description**: Description of the check (e.g., "Persuade the guard").
-    - **success_response**: What you will say if the player succeeds (e.g., "Very well, you make a compelling point.").
-    - **failure_response**: What you will say if the player fails (e.g., "I don't think so. Move along.").
-
-IMPORTANT: You MUST output valid JSON. If you are offering a quest, the 'quest_offered' field is mandatory. If resolving a quest, 'quest_resolved' is mandatory. Do not just write the dialogue.
+IMPORTANT: Your whole reply MUST be one valid JSON object in the shape above, with "dialogue" always present. If you are offering a quest, the 'quest_offered' field is mandatory. If resolving a quest, 'quest_resolved' is mandatory. Do not just write the dialogue.
 """.replace("{ANTI_YES_AND_RULES}", ANTI_YES_AND_RULES).replace("{ENTITY_TIER_DESCRIPTIONS}", ENTITY_TIER_DESCRIPTIONS).replace("{QUEST_REWARD_RULES}", QUEST_REWARD_RULES)
 
 def validate_quest_output(quest_data: Dict[str, Any]) -> List[str]:
-    """Returns list of validation errors, empty if valid."""
+    """Returns list of validation errors, empty if valid.
+
+    Slice 1 contract: the model proposes a tier and/or a difficulty label
+    per challenge and NEVER writes a `dc` — the engine assigns it. So `dc`
+    is not required here (and a supplied one is ignored downstream, not an
+    error, since older prompts may still emit it). What is an error: an
+    unknown type, tier, or label, or a tier and a label that disagree.
+    """
     errors = []
-    
+
     if not quest_data:
         return ["Quest data is empty or None"]
-    
+
     # Check for required fields in Quest
     required_quest = ["id", "description", "challenges", "accept_response", "refuse_response"]
     for field in required_quest:
         if field not in quest_data:
             errors.append(f"Missing required field in quest: {field}")
-            
+
+    if "tier" in quest_data and quest_data["tier"] not in DIFFICULTY_TABLE:
+        errors.append(f"Invalid quest tier: {quest_data['tier']}")
+
     if "challenges" in quest_data:
         for challenge in quest_data["challenges"]:
-            # Check difficulty matches DC
-            dc_map = {"easy": 10, "medium": 15, "hard": 20, "heroic": 25}
-            difficulty = challenge.get("difficulty")
-            dc = challenge.get("dc")
-            
-            if difficulty and dc and dc != dc_map.get(difficulty):
-                errors.append(f"DC {dc} doesn't match difficulty level {difficulty}")
-            
-            # Check challenge type is valid
-            valid_types = ["strength", "dexterity", "intelligence", "charisma"]
-            if challenge.get("type") not in valid_types:
+            # Check challenge type is valid (lowercase, as the prompt shows)
+            if challenge.get("type") not in CHALLENGE_TYPES:
                 errors.append(f"Invalid challenge type: {challenge.get('type')}")
-            
-            # Check for required fields in Challenge
-            required_challenge = ["id", "type", "dc", "description"]
+
+            # Tier and difficulty label must each be known, and agree
+            tier = challenge.get("tier")
+            difficulty = challenge.get("difficulty")
+            if tier is not None and tier not in DIFFICULTY_TABLE:
+                errors.append(f"Invalid challenge tier: {tier}")
+            if difficulty is not None and difficulty not in DIFFICULTY_LABEL_TO_TIER:
+                errors.append(f"Invalid challenge difficulty: {difficulty}")
+            if tier is not None and difficulty is not None:
+                if DIFFICULTY_LABEL_TO_TIER[difficulty] != tier:
+                    errors.append(
+                        f"Challenge tier {tier} disagrees with difficulty "
+                        f"{difficulty} (maps to {DIFFICULTY_LABEL_TO_TIER[difficulty]})"
+                    )
+
+            # A supplied dc must at least be an integer; the engine
+            # overwrites it with its own assignment either way.
+            dc = challenge.get("dc")
+            if dc is not None and not isinstance(dc, int):
+                errors.append(f"Challenge dc must be an integer, got: {dc!r}")
+
+            # Check for required fields in Challenge (dc and quest_id are
+            # engine-supplied, so they are not required from the model)
+            required_challenge = ["id", "type", "description"]
             for field in required_challenge:
                 if field not in challenge:
                     errors.append(f"Missing required field in challenge: {field}")
-    
+
     return errors
+
+
+def validate_skill_check_proposal(skill_check: Dict[str, Any]) -> List[str]:
+    """Validate an immediate skill check from a turn. Label only — the
+    engine computes the DC, so `dc` is neither required nor checked."""
+    errors = []
+    if not skill_check:
+        return ["Skill check is empty or None"]
+    if skill_check.get("type") not in CHALLENGE_TYPES:
+        errors.append(f"Invalid skill check type: {skill_check.get('type')}")
+    if skill_check.get("difficulty") not in DIFFICULTY_LABEL_TO_TIER:
+        errors.append(f"Invalid skill check difficulty: {skill_check.get('difficulty')}")
+    for field in ["description", "success_response", "failure_response"]:
+        if field not in skill_check:
+            errors.append(f"Missing required field in skill check: {field}")
+    return errors
+
+
+async def get_structured_turn(conversation_history: List[Dict],
+                              system_instruction: str = None) -> TurnResponse:
+    """One conversation turn, structured. Requests the reply in JSON mode
+    and Pydantic-validates it into a TurnResponse, replacing the regex
+    extraction for conversation. On any failure (bad JSON, failed
+    validation, provider error) it falls back to whatever dialogue could
+    be extracted, with everything else empty — the turn still plays,
+    just without structured effects."""
+    text = ""
+    try:
+        text = await generate_llm_response(conversation_history,
+                                           system_instruction=system_instruction,
+                                           json_mode=True)
+        _, metadata = extract_json_metadata(text)
+        return TurnResponse.model_validate(metadata)
+    except (ValidationError, ValueError, TypeError) as e:
+        logger.warning(f"Structured turn failed validation, falling back to dialogue only: {e}")
+        try:
+            dialogue, _ = extract_json_metadata(text)
+        except Exception:
+            dialogue = "I'm sorry, I seem to be having trouble responding right now."
+        return TurnResponse(dialogue=dialogue)
+    except Exception as e:
+        logger.error(
+            f"Error calling LLM for structured turn: {type(e).__name__}: {e}"
+        )
+        return TurnResponse(dialogue="I'm sorry, I seem to be having trouble responding right now.")
