@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 class GameWorld:
     def __init__(self):
         self.name: str | None = None
+        self.description: str | None = None
         self.locations: Dict[str, Location] = {}
         self.characters: Dict[str, Dict[str, Character]] = {}
 
@@ -77,6 +78,9 @@ def initialize_game_world(world_name: str | None = None):
         raise # Re-raise the exception after logging
 
     game_world.name = game_data.world
+    # Kept so save_world() can round-trip the file (it was dropped
+    # before, and the description would have been lost on save).
+    game_world.description = game_data.description
 
     for location in game_data.locations:
         game_world.add_location(location)
@@ -117,4 +121,46 @@ def initialize_game_world(world_name: str | None = None):
     else:
         logger.warning("No locations loaded into the game world.")
         return None
+
+
+def save_world(world_file: str | None = None) -> str:
+    """Serialize the loaded world back to its JSON file, atomically.
+
+    Slice 5 (write-back, §22): the persistence half of the commit
+    bridge. The injected debug NPC, The Architect, is load-time only
+    and is filtered out, so he never becomes canon. Fields that are
+    None (notably `id` and `provenance` on shipped entities) are
+    omitted, so a round-trip leaves the shipped file byte-stable
+    apart from the committed additions. Raises on failure — the caller
+    (write_back) decides what a failed save means for the turn.
+    """
+    if not game_world.name:
+        raise ValueError("No world loaded; cannot save.")
+
+    if world_file is None:
+        world_file = os.path.join(os.path.dirname(__file__), "worlds",
+                                  f"{game_world.name}.json")
+
+    locations = []
+    for loc in game_world.locations.values():
+        data = loc.model_dump(mode="json", exclude_none=True)
+        data["characters"] = [
+            c for c in data.get("characters", [])
+            if c.get("name") != "The Architect"
+        ]
+        locations.append(data)
+
+    payload = {
+        "world": game_world.name,
+        "description": game_world.description or "",
+        "locations": locations,
+    }
+
+    tmp_file = world_file + ".tmp"
+    with open(tmp_file, "w") as f:
+        json.dump(payload, f, indent=4)
+        f.write("\n")
+    os.replace(tmp_file, world_file)
+    logger.info(f"World saved to {world_file}")
+    return world_file
 
