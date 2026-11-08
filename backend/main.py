@@ -15,6 +15,8 @@ from pydantic import BaseModel
 
 from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world, game_world
+from .claims_validation import (add_tool_results,
+                                build_prompt_grounded_set, validate_turn)
 from .gemini_service import get_gemini_response, get_structured_turn, get_structured_turn_with_tools, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
                            ProviderError, LocalOpenAIProvider, GeminiProvider)
@@ -315,6 +317,12 @@ async def interact_with_npc(user_input: UserInput):
 
     system_instruction = build_system_instruction(session_id, npc_id)
 
+    # Grounded set, prompt-time half: what the engine showed the model
+    # before it answered (bindings, memory, quest log). The tool-results
+    # half merges after the turn — a quest the model offers this turn
+    # must not ground its own claims about the entities it just invented.
+    grounded = build_prompt_grounded_set(session_id, npc_id)
+
     conversation_history.append({"role": "user", "parts": [user_input.message]})
     logger.info(f"Conversation history after adding user message: {conversation_history}")
 
@@ -413,25 +421,40 @@ async def interact_with_npc(user_input: UserInput):
         logger.info(f"Quest resolved (turned in): {quest_id}")
         game_state_manager.resolve_quest(session_id, quest_id)
 
-    # Turn extras, slice 1: collect and log. Claims are checked against
-    # known names (locations, characters, NPCs in this session) and
-    # mismatches are logged, not enforced — enforcement is a later slice.
-    # New entities and referrals are logged for now; committing them to
-    # the world is the next slice's write-back work. Memory notes append
-    # to the NPC's memory here; the leave-time call stays as the
-    # consolidator that rewrites memory and greetings from the full
-    # conversation.
-    known_names = {loc.name.lower() for loc in game_world.locations.values()}
-    known_names |= {c.name.lower() for loc in game_world.locations.values()
-                    for c in loc.characters}
-    for claim in turn.claims:
-        subject = (claim.subject or "").lower()
-        if subject and subject not in known_names:
+    # Turn extras, slice 4 (validation invariant): every place or
+    # person the NPC names must come from its bindings or a tool result
+    # this turn. Claims are validated against the grounded set; a
+    # hard-fact contradiction drops the false claim from the record and
+    # queues a [System] correction note, so the NPC can self-correct
+    # in character next turn. New names are recorded as proposals, not
+    # committed — committing them to the world is the next slice's
+    # write-back work. Memory notes append to the NPC's memory here;
+    # the leave-time call stays as the consolidator that rewrites
+    # memory and greetings from the full conversation.
+    grounded = add_tool_results(grounded, tool_calls_made)
+    validation = validate_turn(turn, grounded,
+                               npc_name=npc_info["name"])
+    metadata["claims_validation"] = validation.to_dict()
+    logger.info(f"Claims validation: {validation.summary()}")
+    for entry in validation.claims:
+        if entry.verdict == "contradicts":
             logger.warning(
-                f"Claim names unknown entity: {claim.text!r} "
-                f"(subject {claim.subject!r}, kind {claim.kind})")
+                f"Claim contradicts world state: {entry.text!r} "
+                f"({entry.evidence}; action {entry.action})")
+        elif entry.verdict in ("new_proposed", "ungrounded"):
+            logger.warning(
+                f"Claim {entry.verdict}: {entry.text!r} "
+                f"({entry.evidence}; action {entry.action})")
         else:
-            logger.info(f"Claim ({claim.kind}): {claim.text}")
+            logger.info(f"Claim ({entry.kind}, {entry.verdict}): {entry.text}")
+    for mention in validation.dialogue_mentions:
+        logger.warning(
+            f"Ungrounded name in dialogue: {mention['name']} "
+            f"({mention['evidence']})")
+    if validation.proposals:
+        logger.info(
+            "New entities proposed (not yet committed): "
+            f"{validation.proposals}")
     if turn.new_entities:
         logger.info(
             "New entities proposed (not yet committed): "
@@ -449,6 +472,10 @@ async def interact_with_npc(user_input: UserInput):
 
     game_state_manager.process_metadata(session_id, metadata)
     conversation_history.append({"role": "model", "parts": [gemini_dialogue]})
+    # Correction notes go in after the model's turn, so they are the
+    # last thing the model sees next turn.
+    for note in validation.correction_notes:
+        conversation_history.append({"role": "user", "parts": [note]})
     game_state_manager.update_conversation_history(session_id, conversation_history)
     logger.info(f"Conversation history after adding Gemini response: {conversation_history}")
 
