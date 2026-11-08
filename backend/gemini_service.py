@@ -6,6 +6,12 @@ import re
 
 from .models import GameWorldData, TurnResponse
 from .llm_provider import generate_llm_response
+from .world_tools import (
+    MAX_TOOL_CALLS_PER_TURN,
+    TOOLS_BLOCK,
+    execute_tool_call,
+    parse_tool_calls,
+)
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -482,7 +488,7 @@ THE TURN — YOUR WHOLE REPLY IS ONE JSON OBJECT:
     }},
     "new_entities": [ {{ "kind": "character", "name": "Joren", "description": "A trapper who has seen the man.", "location": "Oakhaven" }} ] (only for people, places, or things you invented that are not in the world yet; "kind" is one of "character", "location", "item", "other" — use "other" for anything that is not clearly one of the first three, such as a plant or a substance),
     "referrals": [ {{ "to_name": "Joren", "to_kind": "person", "reason": "He has seen the man." }} ] (only when you send the player to someone more knowledgeable; "to_kind" is "person" or "place"),
-    "claims": [ {{ "text": "Corvin camps in the Whispering Woods.", "kind": "fact", "subject": "Corvin" }} ] (every factual claim you made in your dialogue, each marked "fact", "inference", or "rumor"),
+    "claims": [ {{ "text": "Brom works at the smithy in Oakhaven.", "kind": "fact", "subject": "Brom" }} ] (every factual claim you made in your dialogue, each marked "fact", "inference", or "rumor"),
     "memory_update": ["The player promised to help with the moonpetal."] (only short facts worth remembering about this player)
 }}
 
@@ -608,3 +614,93 @@ async def get_structured_turn(conversation_history: List[Dict],
             f"Error calling LLM for structured turn: {type(e).__name__}: {e}"
         )
         return TurnResponse(dialogue="I'm sorry, I seem to be having trouble responding right now.")
+
+
+async def get_structured_turn_with_tools(
+        conversation_history: List[Dict],
+        system_instruction: str = None,
+        session_id: str = None,
+        max_tool_calls: int = MAX_TOOL_CALLS_PER_TURN
+) -> Tuple[TurnResponse, List[Dict[str, Any]]]:
+    """One conversation turn with the tool-call loop (slice 2).
+
+    The model gets the usual system instruction plus the tools block.
+    When its reply is a tool-calls block, the engine executes the calls
+    against the loaded world (cap `max_tool_calls` per turn), feeds the
+    JSON results back as a user-role message, and asks again. When the
+    reply is the final TurnResponse — or the budget is spent — the turn
+    is parsed and validated exactly like `get_structured_turn`, with
+    the same dialogue-only fallback.
+
+    Returns the TurnResponse and the list of tool calls made this turn
+    (each with its tool, args, and result), so the caller — and the
+    validation-invariant slice after this one — can check what the
+    model grounded its claims on. The tool exchanges stay turn-local:
+    the caller's conversation history is not mutated with them.
+
+    Textual tool calls, not native function calling, on purpose: the
+    prototype (§18) validated this exact format, and it works
+    identically across the Gemini and local providers without depending
+    on either one's function-calling support.
+    """
+    history = list(conversation_history)
+    system = (system_instruction or "") + TOOLS_BLOCK
+    tool_calls_made: List[Dict[str, Any]] = []
+    calls_used = 0
+    text = ""
+    try:
+        while True:
+            text = await generate_llm_response(
+                history, system_instruction=system, json_mode=True)
+            calls = parse_tool_calls(text)
+            if not calls:
+                break
+            if calls_used >= max_tool_calls:
+                # Budget spent and the model still wants a tool: tell it
+                # once, plainly, that it must answer now, and ask again.
+                logger.info("Tool budget spent; forcing the final TurnResponse.")
+                history = history + [{
+                    "role": "user",
+                    "parts": ["[System] You have used all your tool calls "
+                              "for this turn. Answer now with your final "
+                              "TurnResponse JSON and no more tool calls."],
+                }]
+                text = await generate_llm_response(
+                    history, system_instruction=system, json_mode=True)
+                break
+            batch = calls[:max_tool_calls - calls_used]
+            results = []
+            for call in batch:
+                result = execute_tool_call(session_id, call.get("tool"),
+                                           call.get("args") or {})
+                record = {"tool": call.get("tool"),
+                          "args": call.get("args") or {},
+                          "result": result}
+                results.append(record)
+                tool_calls_made.append(record)
+                calls_used += 1
+                logger.info(f"Tool call: {record['tool']} "
+                            f"{record['args']} -> {result}")
+            history = history + [{
+                "role": "user",
+                "parts": ["[Tool results]\n"
+                          f"{json.dumps(results, indent=2)}\n"
+                          "Use these results to answer. Reply with your "
+                          "final TurnResponse JSON, or with at most one "
+                          "more tool call if you still need a fact."],
+            }]
+        _, metadata = extract_json_metadata(text)
+        return TurnResponse.model_validate(metadata), tool_calls_made
+    except (ValidationError, ValueError, TypeError) as e:
+        logger.warning(f"Structured turn with tools failed validation, "
+                       f"falling back to dialogue only: {e}")
+        try:
+            dialogue, _ = extract_json_metadata(text)
+        except Exception:
+            dialogue = "I'm sorry, I seem to be having trouble responding right now."
+        return TurnResponse(dialogue=dialogue), tool_calls_made
+    except Exception as e:
+        logger.error(
+            f"Error calling LLM for structured turn with tools: {type(e).__name__}: {e}"
+        )
+        return TurnResponse(dialogue="I'm sorry, I seem to be having trouble responding right now."), tool_calls_made
