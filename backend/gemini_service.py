@@ -495,7 +495,7 @@ THE TURN — YOUR WHOLE REPLY IS ONE JSON OBJECT:
 Rules for the turn JSON:
 - "dialogue" is always present. Every other field is optional — include it only when it applies.
 - For "skill_check": give a difficulty label only — "easy", "medium", "hard", or "heroic" (easy = average band, medium = tough, hard = elite, heroic = boss). NEVER write a "dc" — the engine computes it.
-- For "claims": list what you asserted in your dialogue. Mark it "fact" if you stated it as true, "inference" if you reasoned it from what you know, "rumor" if you heard it secondhand. If you are not sure of something, say so in character and mark it "rumor".
+- For "claims": list what you asserted in your dialogue. Mark it "fact" if you stated it as true, "inference" if you reasoned it from what you know, "rumor" if you heard it secondhand. If you are not sure of something, say so in character and mark it "rumor". Name only places and people from your bindings above or a tool result this turn; if you named anything else, list it in "claims" anyway — the engine checks every claim against the world.
 - For "referrals": if you do not know something and you know who would, send the player there instead of guessing.
 - For "new_entities": only things you invented in this turn. Never list anything already in the world. "kind" must be one of "character", "location", "item", "other".
 - For "quest_resolved": ONLY when the player explicitly reports completion to you.
