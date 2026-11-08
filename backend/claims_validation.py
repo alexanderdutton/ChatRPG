@@ -36,7 +36,10 @@ Verdicts per claim:
   checkable against world state (opinions, moods, uncheckable facts).
 
 Mismatch policy (one table, MISMATCH_POLICY, so it flips in one
-place — the design leaves the choice per claim kind, §13):
+place — the design leaves the choice per claim kind, §13). Only the
+validator reads this table. The prompt stays policy-agnostic: it
+carries the naming rule (name only bindings/tool-result places and
+people), not the consequences — the engine decides those here.
 - a hard-fact contradiction (fact/inference about where someone is,
   where an exit leads, who is present) is CORRECTED: the false claim
   is dropped from the record and a [System] correction note goes into

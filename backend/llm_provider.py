@@ -63,10 +63,16 @@ class LocalOpenAIProvider(LLMProvider):
         self.base_url = (base_url or os.getenv(
             "CHATRPG_LOCAL_BASE_URL", DEFAULT_LOCAL_BASE_URL)).rstrip("/")
         self.model = model or os.getenv("CHATRPG_LOCAL_MODEL") or None
+        # trust_env=False: the game talks to localhost or a URL the user
+        # configured, never through a proxy — and httpx 0.28.1 misparses
+        # this sandbox's NO_PROXY (it lists [::1], which becomes the
+        # unparseable pattern "all://[::1]") at client construction, so
+        # reading the environment raised InvalidURL before any request.
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             transport=transport,
             timeout=httpx.Timeout(timeout),
+            trust_env=False,
         )
 
     def is_configured(self) -> bool:
