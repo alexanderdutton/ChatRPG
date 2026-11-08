@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world, game_world
-from .gemini_service import get_gemini_response, get_structured_turn, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
+from .gemini_service import get_gemini_response, get_structured_turn, get_structured_turn_with_tools, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
                            ProviderError, LocalOpenAIProvider, GeminiProvider)
 from .gemini_image_generator import generate_and_save_image
@@ -318,11 +318,19 @@ async def interact_with_npc(user_input: UserInput):
     conversation_history.append({"role": "user", "parts": [user_input.message]})
     logger.info(f"Conversation history after adding user message: {conversation_history}")
 
-    # One structured turn (slice 1): JSON mode + Pydantic validation.
-    # Falls back to dialogue-only if the turn fails validation.
+    # One structured turn with the tool-call loop (slice 2): the model
+    # may look facts up in the world before answering, at most two calls.
+    # Falls back to dialogue-only if the turn fails validation. The tool
+    # calls made are returned alongside the turn so the claims check
+    # below — and the validation-invariant slice after this one — can
+    # see what the model grounded its claims on.
     logger.info("Calling Gemini API...")
-    turn = await get_structured_turn(conversation_history,
-                                     system_instruction=system_instruction)
+    turn, tool_calls_made = await get_structured_turn_with_tools(
+        conversation_history,
+        system_instruction=system_instruction,
+        session_id=session_id)
+    if tool_calls_made:
+        logger.info(f"Tool calls this turn: {tool_calls_made}")
     gemini_dialogue = turn.dialogue
     metadata = turn.model_dump(mode="json", exclude_none=True)
     logger.info(f"Received Gemini dialogue: {gemini_dialogue}")
