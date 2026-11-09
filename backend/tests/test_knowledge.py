@@ -96,6 +96,35 @@ class TestKnowledgeModifiers(unittest.TestCase):
                                 check_type="intelligence"),
             [])
 
+    def test_whole_word_matching(self):
+        # Ellie review, finding 4: a topic must appear as a whole
+        # word, not as letters inside a longer word. "Oakhaven"
+        # fires on "Oakhavenwood" under substring matching; it must
+        # not here.
+        oakhaven = {"id": "brom-k2", "topic": "Oakhaven",
+                    "fact": "Brom knows every hinge in town.",
+                    "source": "saw", "confidence": "high",
+                    "dc_modifier": -5, "applies_to": None}
+        self.assertEqual(
+            knowledge_modifiers([oakhaven], subjects=None,
+                                description="the Oakhavenwood forest"),
+            [])
+        # But a possessive is the same word, and a phrase still matches.
+        self.assertEqual(
+            knowledge_modifiers([BRIEFING], subjects=["Corvin's camp"],
+                                check_type="charisma"),
+            [-5])
+
+    def test_scoped_entry_without_check_type_does_not_match(self):
+        # Ellie review, finding 5: an entry scoped to a type, with no
+        # type given, contributes nothing — and says so.
+        with self.assertLogs("backend.knowledge", level="WARNING") as cm:
+            self.assertEqual(
+                knowledge_modifiers([BRIEFING], subjects=["Corvin"],
+                                    check_type=None),
+                [])
+        self.assertTrue(any("elara-k5" in line for line in cm.output))
+
 
 class TestSharingAndLedger(unittest.TestCase):
     def test_validate_shared_splits_known_and_unknown(self):
@@ -128,6 +157,54 @@ class TestKnowledgeEntryValidation(unittest.TestCase):
         entry = KnowledgeEntry(id="x", topic="Corvin", fact="f",
                                source="dreamed_it")
         self.assertEqual(entry.source, "heard_from")
+
+
+class TestReferralIdResolution(unittest.TestCase):
+    """Ellie review, finding 3: a referral recorded by name must
+    still match a follow-up given by id — a generated NPC's id can be
+    suffixed on collision ("brom-2"), so name-only matching would
+    strand the referral forever."""
+
+    def test_resolve_by_name_and_by_id(self):
+        initialize_game_world("Elodia")
+        from backend.models import Character
+        second = Character(
+            id="brom-2", name="Brom the Second", race="dwarf",
+            occupation="blacksmith", description="Brom's cousin.",
+            personality_prompt="You are Brom the Second.", x=1, y=1,
+            short_description="Another dwarf blacksmith.")
+        game_world.add_character(second, "Oakhaven")
+        from backend.game_state_manager import GameStateManager
+        gsm = GameStateManager()
+        self.assertEqual(gsm.resolve_npc_id("Brom the Second"), "brom-2")
+        self.assertEqual(gsm.resolve_npc_id("brom-2"), "brom-2")
+        # Shipped NPCs have no id; the name is the identifier.
+        self.assertEqual(gsm.resolve_npc_id("Elara"), "Elara")
+        self.assertEqual(gsm.resolve_npc_id("Nobody"), "Nobody")
+
+    def test_follow_up_by_id_matches_recorded_name(self):
+        initialize_game_world("Elodia")
+        from backend.models import Character
+        second = Character(
+            id="brom-2", name="Brom the Second", race="dwarf",
+            occupation="blacksmith", description="Brom's cousin.",
+            personality_prompt="You are Brom the Second.", x=1, y=1,
+            short_description="Another dwarf blacksmith.")
+        game_world.add_character(second, "Oakhaven")
+        from backend.game_state_manager import GameStateManager
+        gsm = GameStateManager()
+        session_id = "test_session_referral_id"
+        gsm.create_session(session_id, "TestPlayer")
+        gsm.set_pending_referrals(session_id, [{
+            "to_name": "Brom the Second",
+            "to_id": gsm.resolve_npc_id("Brom the Second"),
+            "to_kind": "person", "reason": "He knows the forge.",
+            "from_npc": "Elara", "turn": 1, "followed": False,
+        }])
+        # The follow-up arrives as the slug id, not the name.
+        self.assertTrue(gsm.mark_referral_followed(session_id, "brom-2"))
+        self.assertTrue(
+            gsm.get_pending_referrals(session_id)[0]["followed"])
 
 
 class TestSeededKnowledge(unittest.TestCase):

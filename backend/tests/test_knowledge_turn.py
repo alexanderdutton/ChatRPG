@@ -131,10 +131,13 @@ class TestKnowledgeTurn(unittest.TestCase):
             "dialogue": "I know a secret.",
             "knowledge_shared": ["nope-k9"],
         })
-        body = self._interact("Tell me something.", [turn])
+        # Finding 7: pin both halves of the "dropped and logged" path.
+        with self.assertLogs("backend.main", level="WARNING") as cm:
+            body = self._interact("Tell me something.", [turn])
         self.assertNotIn("knowledge_learned", body["metadata"])
         self.assertEqual(
             self.gsm.get_learned_knowledge(self.session_id), [])
+        self.assertTrue(any("nope-k9" in line for line in cm.output))
 
     def test_quest_challenge_modifier(self):
         # Learn the briefing first.
@@ -144,22 +147,17 @@ class TestKnowledgeTurn(unittest.TestCase):
         })
         self._interact("What does the taking cost?", [share])
 
+        # The recorded Turn 1 offer, kept as an in-repo fixture (Ellie
+        # review, finding 1): the e2e used to read it from outside the
+        # repo, which went red on a fresh clone. The fixture's rewards
+        # are already stripped of items (Elara cannot offer them).
         with open(os.path.join(
-                os.path.dirname(__file__), '..', '..', '..',
-                'echo-autonomy', 'chatrpg-verification',
-                'subagent_turn1.json')) as f:
+                os.path.dirname(__file__), 'fixtures',
+                'turn1_quest_offer.json')) as f:
             recorded = json.load(f)
-        # The recorded offer's rewards include items, which Elara
-        # (resource level "poor") cannot offer — the live engine drops
-        # such an offer in the economy check. Strip the items: this
-        # test is about the DC modifiers, not the rewards. (That the
-        # recorded Turn 1 offer would be dropped live is a real
-        # finding, noted in §23.)
-        quest_offered = dict(recorded["quest_offered"])
-        quest_offered["rewards"] = {"gold": 0, "items": []}
         offer = json.dumps({
             "dialogue": recorded["dialogue"],
-            "quest_offered": quest_offered,
+            "quest_offered": recorded["quest_offered"],
             "new_entities": recorded["new_entities"],
         })
         body = self._interact("What do you need?", [offer])
@@ -187,6 +185,63 @@ class TestKnowledgeTurn(unittest.TestCase):
         corvin = game_world.get_character("Corvin", "Oakhaven")
         self.assertIsNotNone(corvin)
         self.assertEqual(corvin.knowledge, [])
+
+    def test_knowledge_stacks_across_referral(self):
+        # Finding 2: the cumulative leg of the worked example, end to
+        # end — learn from Elara, then from Joren, then re-check. The
+        # replay covers it; this pins it in the suite.
+        share = json.dumps({
+            "dialogue": "Without moonpetal there are no fever remedies.",
+            "knowledge_shared": ["elara-k5"],
+        })
+        self._interact("What does the taking cost?", [share])
+
+        joren = json.dumps({
+            "dialogue": "Ask Joren the trapper — he has seen the man.",
+            "referrals": [{"to_name": "Joren", "to_kind": "person",
+                           "reason": "He has seen the man."}],
+            "new_entities": [{
+                "kind": "character", "name": "Joren",
+                "description": "A trapper who works the deep woods.",
+                "location": "Oakhaven",
+                "knowledge": [{
+                    "id": "joren-k1", "topic": "Corvin",
+                    "fact": "He takes the roots for his sick wife's medicine.",
+                    "source": "saw", "confidence": "high",
+                    "dc_modifier": -5, "applies_to": "charisma",
+                }],
+            }],
+        })
+        self._interact("Who would know more?", [joren])
+        self.assertEqual(
+            [e.id for e in
+             game_world.get_character("Joren", "Oakhaven").knowledge],
+            ["joren-k1"])
+
+        leave = self.client.post("/command", json={
+            "session_id": self.session_id, "command": "leave"})
+        self.assertEqual(leave.status_code, 200)
+        talk = self.client.post("/command", json={
+            "session_id": self.session_id, "command": "talk to Joren"})
+        self.assertEqual(talk.status_code, 200)
+        self.assertTrue(
+            self.gsm.get_pending_referrals(self.session_id)[0]["followed"])
+
+        joren_share = json.dumps({
+            "dialogue": "He takes the roots for his sick wife. Coin for medicine.",
+            "knowledge_shared": ["joren-k1"],
+        })
+        self._interact("What do you know of Corvin?", [joren_share])
+        self.assertEqual(
+            [e["id"] for e in
+             self.gsm.get_learned_knowledge(self.session_id)],
+            ["elara-k5", "joren-k1"])
+
+        body = self._interact("I will talk to Corvin.",
+                              [self._persuasion_check()])
+        sc = body["metadata"]["skill_check"]
+        self.assertEqual(sc["dc"], 10)
+        self.assertEqual(sc["knowledge_modifiers"], [-5, -5])
 
     def test_referral_recorded_and_followed(self):
         refer = json.dumps({
