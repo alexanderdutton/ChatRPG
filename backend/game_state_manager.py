@@ -1200,6 +1200,17 @@ class GameStateManager:
         conn.commit()
         conn.close()
 
+        # Register the quest's named entities as stubs (slice 6 review
+        # follow-up): names the quest mentions that the world does not
+        # know yet become "mentioned" stubs for later expansion. This
+        # is the only live call site — the previous one sat as dead
+        # code after the return in refuse_quest, so add_quest never
+        # created stubs and test_entity_stub_creation only passed on
+        # leftover rows in the committed database.
+        if quest_data.get('involved_entities'):
+            self.process_involved_entities(
+                session_id, quest_data['involved_entities'])
+
     def get_quest_log(self, session_id: str) -> List[str]:
         """Retrieves the player's quest log (titles/descriptions of active/completed quests)."""
         conn = sqlite3.connect(DB_PATH)
@@ -1259,17 +1270,13 @@ class GameStateManager:
         cursor.execute("UPDATE quests SET status = 'refused' WHERE id = ? AND session_id = ?", (quest_id, session_id))
         conn.commit()
         conn.close()
-        
+
         # Update Relationship
         giver = self.get_quest_giver(session_id, quest_id)
         if giver:
             self.update_relationship(session_id, giver, "quest_refused")
-            
+
         return response_text
-        
-        # Process involved entities
-        if 'involved_entities' in quest_data:
-            self.process_involved_entities(session_id, quest_data['involved_entities'])
 
     def get_quest_giver(self, session_id: str, quest_id: str) -> Optional[str]:
         """Retrieves the name of the NPC who gave the quest."""
