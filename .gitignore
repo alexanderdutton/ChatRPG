@@ -20,6 +20,11 @@ Thumbs.db
 *.png # Temporarily exclude generated images until stable
 error.txt
 
+# Runtime databases — created at startup, never committed (they carry
+# session state; a committed copy makes fresh clones inherit stale
+# test runs). See PR #6 review follow-up, 2026-11-09.
+*.db
+
 # Ignore all files in backend/worlds/
 backend/worlds/*
 
