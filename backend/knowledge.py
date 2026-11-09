@@ -19,20 +19,34 @@ The rules:
 - Learning is deduped by entry id: the player cannot learn the same
   fact twice.
 """
+import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
+def _contains_word(haystack: str, needle: str) -> bool:
+    """Whole-word match: `needle` must appear as a word (or phrase)
+    in `haystack`. A topic like "Oakhaven" no longer fires on any
+    description merely containing those letters (Ellie review,
+    finding 4)."""
+    if not needle:
+        return False
+    return re.search(r"\b" + re.escape(needle) + r"\b", haystack) is not None
+
+
 def _topic_matches(topic: str, subject: Optional[str]) -> bool:
-    """Normalized topic/subject match: equal, or either inside the other."""
+    """Normalized topic/subject match: equal, or either one appearing
+    as a whole word (or phrase) inside the other."""
     t, s = _normalize(topic), _normalize(subject)
     if not t or not s:
         return False
-    return t == s or t in s or s in t
+    return _contains_word(s, t) or _contains_word(t, s)
 
 
 def knowledge_modifiers(
@@ -54,13 +68,23 @@ def knowledge_modifiers(
         if not entry.get("dc_modifier"):
             continue
         applies_to = entry.get("applies_to")
-        if applies_to is not None and check_type is not None:
+        if applies_to is not None:
+            if check_type is None:
+                # Scoped knowledge with nothing to scope it against:
+                # do not match, and say so (Ellie review, finding 5).
+                # A future caller that forgets the check type gets no
+                # modifier instead of an unscoped one.
+                logger.warning(
+                    f"Knowledge entry {entry.get('id')!r} applies to "
+                    f"{applies_to!r} but the check has no type; skipping.")
+                continue
             if _normalize(applies_to) != _normalize(check_type):
                 continue
         topic = entry.get("topic", "")
         matched = any(_topic_matches(topic, s) for s in subjects)
         if not matched and not subjects and description:
-            matched = _normalize(topic) in _normalize(description)
+            matched = _contains_word(_normalize(description),
+                                     _normalize(topic))
         if matched:
             modifiers.append(int(entry["dc_modifier"]))
     return modifiers
@@ -74,10 +98,15 @@ def validate_shared(
     actually knows and the unknown ids (dropped and logged by the
     caller). The model claiming to share something the NPC does not
     know is itself a signal."""
-    by_id = {e.get("id"): e for e in npc_knowledge or []}
+    by_id = {e.get("id"): e for e in npc_knowledge or []
+             if e.get("id") is not None}
     valid: List[Dict[str, Any]] = []
     unknown: List[str] = []
     for shared_id in shared_ids or []:
+        if shared_id is None:
+            # An entry without an id collapses into a None key (Ellie
+            # review, finding 6); skip it rather than matching it.
+            continue
         entry = by_id.get(shared_id)
         if entry is None:
             unknown.append(shared_id)

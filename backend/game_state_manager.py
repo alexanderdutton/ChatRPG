@@ -616,13 +616,33 @@ class GameStateManager:
                               referrals: List[Dict[str, Any]]):
         self._update_session_field(session_id, "pending_referrals", referrals)
 
-    def mark_referral_followed(self, session_id: str, to_name: str) -> bool:
-        """Mark the pending referral to `to_name` as followed. Returns
-        True when a pending referral was found."""
+    def resolve_npc_id(self, identifier: str) -> str:
+        """Resolve a name-or-id to the character's id, when the world
+        knows it (Ellie review, finding 3). The codebase calls the
+        conversation partner an "id" while the value is a name, and a
+        generated NPC's id can be suffixed on collision ("brom-2") —
+        so a referral recorded by name and a follow-up given by id
+        would never meet. Both sides resolve through here; an unknown
+        identifier comes back unchanged."""
+        for loc_chars in game_world.characters.values():
+            for name, char in loc_chars.items():
+                if name == identifier or (char.id and char.id == identifier):
+                    return char.id or name
+        return identifier
+
+    def mark_referral_followed(self, session_id: str, partner: str) -> bool:
+        """Mark the pending referral to `partner` as followed. The
+        partner may be a name or an id; the referral matches by id
+        when both sides resolved, and by name otherwise. Returns True
+        when a pending referral was found."""
+        partner_id = self.resolve_npc_id(partner)
         referrals = self.get_pending_referrals(session_id)
         followed = False
         for ref in referrals:
-            if ref.get("to_name") == to_name and not ref.get("followed"):
+            if ref.get("followed"):
+                continue
+            if (ref.get("to_id") == partner_id
+                    or ref.get("to_name") == partner):
                 ref["followed"] = True
                 followed = True
         if followed:

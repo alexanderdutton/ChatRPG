@@ -549,13 +549,18 @@ async def interact_with_npc(user_input: UserInput):
         # to, so the referred NPC knows why they came — and so the
         # engine can mark the referral followed when the player
         # arrives. Deduped by name; the dice benefit comes from the
-        # knowledge learned, not the referral itself.
+        # knowledge learned, not the referral itself. The name is
+        # resolved to the character's id at recording time (Ellie
+        # review, finding 3): a generated NPC's id can be suffixed on
+        # collision, so a name-only record would never match a
+        # follow-up given by id.
         pending = game_state_manager.get_pending_referrals(session_id)
         known = {r.get("to_name") for r in pending}
         for ref in turn.referrals:
             if ref.to_name not in known:
                 pending.append({
                     "to_name": ref.to_name,
+                    "to_id": game_state_manager.resolve_npc_id(ref.to_name),
                     "to_kind": ref.to_kind,
                     "reason": ref.reason,
                     "from_npc": npc_info["name"],
