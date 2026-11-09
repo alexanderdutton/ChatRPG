@@ -482,11 +482,13 @@ THE TURN — YOUR WHOLE REPLY IS ONE JSON OBJECT:
     "skill_check": {{ (only when the conversation calls for an immediate check)
         "type": "charisma",
         "difficulty": "medium",
+        "subject": "Corvin",
         "description": "Persuade the guard to let you pass.",
         "success_response": "Very well, you make a compelling point.",
         "failure_response": "I don't think so. Move along."
     }},
-    "new_entities": [ {{ "kind": "character", "name": "Joren", "description": "A trapper who has seen the man.", "location": "Oakhaven" }} ] (only for people, places, or things you invented that are not in the world yet; "kind" is one of "character", "location", "item", "other" — use "other" for anything that is not clearly one of the first three, such as a plant or a substance),
+    "knowledge_shared": ["elara-k1"] (the ids of the knowledge entries you shared with the player this turn — only entries from your knowledge list in the bindings above; never invent an id),
+    "new_entities": [ {{ "kind": "character", "name": "Joren", "description": "A trapper who has seen the man.", "location": "Oakhaven", "knowledge": [ {{ "id": "joren-k1", "topic": "Corvin", "fact": "He takes the roots for his sick wife's medicine.", "source": "saw", "confidence": "high", "dc_modifier": -5, "applies_to": "charisma" }} ] }} ] (only for people, places, or things you invented that are not in the world yet; "kind" is one of "character", "location", "item", "other" — use "other" for anything that is not clearly one of the first three, such as a plant or a substance),
     "referrals": [ {{ "to_name": "Joren", "to_kind": "person", "reason": "He has seen the man." }} ] (only when you send the player to someone more knowledgeable; "to_kind" is "person" or "place"),
     "claims": [ {{ "text": "Brom works at the smithy in Oakhaven.", "kind": "fact", "subject": "Brom" }} ] (every factual claim you made in your dialogue, each marked "fact", "inference", or "rumor"),
     "memory_update": ["The player promised to help with the moonpetal."] (only short facts worth remembering about this player)
@@ -494,7 +496,8 @@ THE TURN — YOUR WHOLE REPLY IS ONE JSON OBJECT:
 
 Rules for the turn JSON:
 - "dialogue" is always present. Every other field is optional — include it only when it applies.
-- For "skill_check": give a difficulty label only — "easy", "medium", "hard", or "heroic" (easy = average band, medium = tough, hard = elite, heroic = boss). NEVER write a "dc" — the engine computes it.
+- For "skill_check": give a difficulty label only — "easy", "medium", "hard", or "heroic" (easy = average band, medium = tough, hard = elite, heroic = boss). NEVER write a "dc" — the engine computes it. Name the "subject" — the person or thing the check is about — so the engine can apply what the player has learned about them.
+- For "knowledge_shared": list the ids of the knowledge entries you actually shared with the player this turn, from your knowledge list in the bindings above. Share only what you know — never invent an id, and never claim knowledge that is not on your list.
 - For "claims": list what you asserted in your dialogue. Mark it "fact" if you stated it as true, "inference" if you reasoned it from what you know, "rumor" if you heard it secondhand. If you are not sure of something, say so in character and mark it "rumor". Name only places and people from your bindings above or a tool result this turn; if you named anything else, list it in "claims" anyway — the engine checks every claim against the world.
 - For "referrals": if you do not know something and you know who would, send the player there instead of guessing.
 - For "new_entities": only things you invented in this turn. Never list anything already in the world. "kind" must be one of "character", "location", "item", "other".

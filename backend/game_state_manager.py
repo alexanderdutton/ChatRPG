@@ -207,6 +207,15 @@ class GameStateManager:
         except sqlite3.OperationalError:
             pass # Column likely already exists
 
+        # Knowledge ledger + pending referrals (slice 6, §23): what the
+        # player has learned this session, and who they were sent to.
+        for column in ("learned_knowledge", "pending_referrals"):
+            try:
+                cursor.execute(
+                    f"ALTER TABLE sessions ADD COLUMN {column} TEXT DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass # Column likely already exists
+
         # Attempt to add response columns to quests table (migration)
         try:
             cursor.execute("ALTER TABLE quests ADD COLUMN accept_response TEXT")
@@ -475,12 +484,15 @@ class GameStateManager:
         if row:
             data = dict(row)
             # Deserialize JSON fields
-            for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history']:
-                if data[field]:
+            for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
+                          'learned_knowledge', 'pending_referrals']:
+                if data.get(field):
                     try:
                         data[field] = json.loads(data[field])
                     except json.JSONDecodeError:
                         data[field] = [] if field != 'npc_states' else {}
+                elif field in ('learned_knowledge', 'pending_referrals'):
+                    data[field] = []
             return data
         return None
 
@@ -489,7 +501,8 @@ class GameStateManager:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history']:
+        if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
+                     'learned_knowledge', 'pending_referrals']:
             value = json.dumps(value)
             
         cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
@@ -579,6 +592,42 @@ class GameStateManager:
         """Retrieves the player's current location name for a given session."""
         data = self._get_session_data(session_id)
         return data.get("current_location_name", "Unknown Location") if data else "Unknown Location"
+
+    # -- Knowledge ledger + pending referrals (slice 6, §23) --------------
+    # The ledger is what the player has learned this session (snapshots
+    # of knowledge entries with provenance); referrals are who the
+    # player was sent to and whether they followed up. Both are
+    # session-scoped by design — what the player knows does not persist
+    # across playthroughs.
+
+    def get_learned_knowledge(self, session_id: str) -> List[Dict[str, Any]]:
+        data = self._get_session_data(session_id)
+        return data.get("learned_knowledge") or [] if data else []
+
+    def set_learned_knowledge(self, session_id: str,
+                              ledger: List[Dict[str, Any]]):
+        self._update_session_field(session_id, "learned_knowledge", ledger)
+
+    def get_pending_referrals(self, session_id: str) -> List[Dict[str, Any]]:
+        data = self._get_session_data(session_id)
+        return data.get("pending_referrals") or [] if data else []
+
+    def set_pending_referrals(self, session_id: str,
+                              referrals: List[Dict[str, Any]]):
+        self._update_session_field(session_id, "pending_referrals", referrals)
+
+    def mark_referral_followed(self, session_id: str, to_name: str) -> bool:
+        """Mark the pending referral to `to_name` as followed. Returns
+        True when a pending referral was found."""
+        referrals = self.get_pending_referrals(session_id)
+        followed = False
+        for ref in referrals:
+            if ref.get("to_name") == to_name and not ref.get("followed"):
+                ref["followed"] = True
+                followed = True
+        if followed:
+            self.set_pending_referrals(session_id, referrals)
+        return followed
 
     def get_world_name(self) -> str:
         """Retrieves the current world name."""

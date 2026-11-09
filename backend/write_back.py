@@ -230,6 +230,16 @@ def commit_new_entities(
             ]
             if description_defaulted:
                 provenance["engine_defaults"].append("description")
+            # Knowledge the model proposed for this person (slice 6,
+            # §23): committed with the character, ids assigned when the
+            # model omitted them, so a generated NPC arrives with
+            # knowledge the player can learn from them.
+            knowledge = []
+            for i, entry in enumerate(entity.knowledge or []):
+                data = entry.model_dump(mode="json", exclude_none=True)
+                if not data.get("id"):
+                    data["id"] = f"{slugify(entity.name)}-k{i + 1}"
+                knowledge.append(data)
             character = Character(
                 id=_unique_id(entity.name, taken_ids),
                 name=entity.name,
@@ -244,6 +254,7 @@ def commit_new_entities(
                 y=npc_y,
                 short_description=_first_sentence(description),
                 provenance=provenance,
+                knowledge=knowledge,
             )
             game_world.add_character(character, place)
             taken_ids.add(character.id)
