@@ -1572,27 +1572,42 @@ class GameStateManager:
         # 1. Check Game World (Static)
         # 2. Check NPC States (Dynamic)
         # 3. Check Entity Stubs (Dynamic)
-        
+
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        for entity_id in entities:
-            # Check if known in game world
-            if game_world.get_character(entity_id) or game_world.get_location(entity_id):
-                continue
-                
-            # Check if exists in stubs
-            cursor.execute("SELECT 1 FROM entity_stubs WHERE id = ? AND session_id = ?", (entity_id, session_id))
-            if cursor.fetchone():
-                continue
-                
-            # Create Stub
-            stub_name = entity_id.replace("_", " ").title()
-            cursor.execute('''
-                INSERT INTO entity_stubs (id, session_id, name, type, status, needs_expansion)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (entity_id, session_id, stub_name, "unknown", "mentioned", True))
-            logger.info(f"Created entity stub for: {entity_id}")
-            
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+
+            for entity_id in entities:
+                # Check if known in game world
+                if game_world.get_character(entity_id) or game_world.get_location(entity_id):
+                    continue
+
+                # Check if exists in stubs. The check is by id ALONE:
+                # entity_stubs.id is the PRIMARY KEY (global, not
+                # per-session), so a stub created by another session
+                # already satisfies it. Checking id AND session_id
+                # passed for a second session and the INSERT then
+                # violated the key (PR #6 + #7 integration failure,
+                # 2026-11-09: 22 failed on the merged branch, each
+                # branch green alone). INSERT OR IGNORE is the
+                # belt-and-braces guard for the same reason.
+                cursor.execute("SELECT 1 FROM entity_stubs WHERE id = ?",
+                               (entity_id,))
+                if cursor.fetchone():
+                    continue
+
+                # Create Stub
+                stub_name = entity_id.replace("_", " ").title()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO entity_stubs (id, session_id, name, type, status, needs_expansion)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (entity_id, session_id, stub_name, "unknown", "mentioned", True))
+                logger.info(f"Created entity stub for: {entity_id}")
+
+            conn.commit()
+        finally:
+            # Always release the connection: an error above used to
+            # leave it open with a failed transaction, and the held
+            # lock cascaded into "database is locked" for the rest of
+            # the run.
+            conn.close()
