@@ -225,5 +225,38 @@ class TestChallengeSystem(unittest.TestCase):
         self.assertEqual(stub[2], "New Entity 1") # Name title-cased
         conn.close()
 
+    def test_stub_shared_across_sessions(self):
+        # Combined-path test (PR #6 + #7 integration, 2026-11-09):
+        # entity_stubs.id is the PRIMARY KEY, global — not
+        # per-session. Two sessions offering quests that mention the
+        # same new entity must share the one stub row, not collide
+        # on the second INSERT. Before the fix this raised
+        # IntegrityError (UNIQUE constraint failed: entity_stubs.id)
+        # and the unclosed connection cascaded into
+        # "database is locked" for the rest of the run.
+        quest_a = {
+            "id": "test_quest_shared_a",
+            "description": "Shared Entity Quest A",
+            "involved_entities": ["shared_entity"],
+        }
+        quest_b = {
+            "id": "test_quest_shared_b",
+            "description": "Shared Entity Quest B",
+            "involved_entities": ["shared_entity"],
+        }
+        self.gsm.add_quest(self.session_id, quest_a)
+
+        other_session = "test_session_challenge_other"
+        self.gsm.create_session(other_session, "TestPlayer")
+        self.gsm.add_quest(other_session, quest_b)
+
+        import sqlite3
+        conn = sqlite3.connect('backend/game_data.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM entity_stubs WHERE id = ?",
+                       ("shared_entity",))
+        self.assertEqual(cursor.fetchone()[0], 1)
+        conn.close()
+
 if __name__ == '__main__':
     unittest.main()
