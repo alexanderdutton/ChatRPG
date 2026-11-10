@@ -1,0 +1,55 @@
+{
+  "_note": "Trimmed from the recorded Turn 1 playtest turn (chatrpg-verification/subagent_turn1.json). The rewards were stripped of items: Elara cannot offer items, and the economy check drops such an offer live. Kept in the repo so the suite stays green on a fresh clone.",
+  "dialogue": "Well, if you're offering... yes, there is something. I am Elara, the herbalist here in Oakhaven, and my stores are running low. The moonpetal that grows in the Whispering Woods, north of here \u2014 the silver-white flowers I grind for fever remedies and wound salves \u2014 a poacher named Corvin has been stripping it bare, roots and all, to sell in the market towns down south. If he keeps at it, there will be nothing left for the sick here in town. I cannot pay you in coin \u2014 I have none to spare \u2014 but I can offer a pouch of healing herbs, the safe paths through the woods, and my gratitude. Go gently, if you go. The woods will know you meant well.",
+  "quest_offered": {
+    "accept_response": "Oh, thank you, Traveler. Truly. Take the north path out of Oakhaven and follow the stream into the woods \u2014 the moonpetal grows where the light falls soft through the oaks. Go gently, and come back safe.",
+    "challenges": [
+      {
+        "description": "Follow the trail of torn moonpetal and trampled undergrowth through the Whispering Woods to Corvin's camp.",
+        "id": "track_corvin",
+        "tier": "average",
+        "type": "dexterity"
+      },
+      {
+        "description": "Find the moonpetal that remains and gather it carefully, roots intact, so it can grow back.",
+        "id": "gather_moonpetal",
+        "tier": "average",
+        "type": "intelligence"
+      },
+      {
+        "description": "Persuade Corvin to leave the moonpetal alone, or at least to take only what the woods can spare.",
+        "id": "persuade_corvin",
+        "tier": "tough",
+        "type": "charisma"
+      }
+    ],
+    "description": "Stop Corvin from stripping the moonpetal bare in the Whispering Woods and bring back moonpetal, roots intact, for Elara's remedies.",
+    "giver_npc": "Elara",
+    "id": "moonpetal_poacher",
+    "involved_entities": [
+      "Corvin",
+      "Whispering Woods",
+      "moonpetal"
+    ],
+    "refuse_response": "I understand. It is a long walk into the woods, and Corvin is not a gentle man. If you change your mind, I will still be here.",
+    "rewards": {
+      "gold": 0,
+      "items": []
+    },
+    "tier": "average"
+  },
+  "new_entities": [
+    {
+      "description": "A poacher who has been stripping moonpetal bare, roots and all, to sell in the market towns down south.",
+      "kind": "character",
+      "location": "Whispering Woods",
+      "name": "Corvin"
+    },
+    {
+      "description": "A silver-white flower that grows in the Whispering Woods; Elara grinds it for fever remedies and wound salves.",
+      "kind": "thing",
+      "location": "Whispering Woods",
+      "name": "moonpetal"
+    }
+  ]
+}

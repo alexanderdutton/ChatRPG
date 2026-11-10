@@ -47,6 +47,56 @@ class Quest(BaseModel):
     status: str = "active"
     challenges: List[Challenge] = []
 
+class KnowledgeEntry(BaseModel):
+    """One thing an NPC knows, as world state with provenance (§14).
+
+    `source` is in-world provenance — how the NPC learned it. `confidence`
+    is how sure the NPC is. Both are recorded and shown to the model, but
+    neither changes the modifier yet; that is the gossip layer, deferred.
+    `dc_modifier` is what the player knowing this fact does to a check
+    about its `topic` (usually negative — knowledge makes the check
+    easier); `applies_to` scopes it to one challenge type, or None for
+    any type about the topic. Modifiers are clamped to [-10, 10] rather
+    than voiding a turn. `id` is optional: the engine assigns one when
+    a generated NPC's knowledge omits it.
+    """
+    id: Optional[str] = None
+    topic: str
+    fact: str
+    source: Literal["saw", "heard_from", "everyone_says"] = "heard_from"
+    confidence: Literal["high", "medium", "low"] = "medium"
+    dc_modifier: int = 0
+    applies_to: Optional[ChallengeType] = None
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _coerce_source(cls, v):
+        if v not in ("saw", "heard_from", "everyone_says"):
+            logger.warning(f"Knowledge source {v!r} is not known; treating as 'heard_from'.")
+            return "heard_from"
+        return v
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, v):
+        if v not in ("high", "medium", "low"):
+            logger.warning(f"Knowledge confidence {v!r} is not known; treating as 'medium'.")
+            return "medium"
+        return v
+
+    @field_validator("dc_modifier", mode="before")
+    @classmethod
+    def _clamp_modifier(cls, v):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            logger.warning(f"Knowledge dc_modifier {v!r} is not a number; treating as 0.")
+            return 0
+        if n < -10 or n > 10:
+            logger.warning(f"Knowledge dc_modifier {n} is out of range; clamping to [-10, 10].")
+            return max(-10, min(10, n))
+        return n
+
 class Character(BaseModel):
     # `id` and `provenance` are engine-set at commit time (slice 5,
     # write-back, §22). Shipped entities keep both as None and their
@@ -62,6 +112,10 @@ class Character(BaseModel):
     y: int
     short_description: str = Field(..., description="A brief, one-sentence description of the character for quick reference.")
     provenance: Optional[Dict[str, Any]] = None
+    # What this NPC knows, as world state with provenance (§14, slice 6).
+    # Seeded in the world file for shipped NPCs; committed with the
+    # character for generated ones.
+    knowledge: List[KnowledgeEntry] = []
 
 class Location(BaseModel):
     # See Character: `id` and `provenance` are engine-set at commit.
@@ -108,6 +162,11 @@ class SkillCheckProposal(BaseModel):
     description: str
     success_response: str
     failure_response: str
+    # The person or thing the check is about (e.g. "Corvin"), so the
+    # engine can apply what the player has learned about them (§14,
+    # slice 6). Optional — without it, the engine falls back to
+    # matching learned topics against the description.
+    subject: Optional[str] = None
 
 class Claim(BaseModel):
     """One factual assertion the model made in its dialogue, so the engine
@@ -132,6 +191,11 @@ class NewEntity(BaseModel):
     name: str
     description: Optional[str] = None
     location: Optional[str] = None
+    # What this invented person knows (§14, slice 6): the model proposes
+    # it, the engine validates the structure and commits it with the
+    # character, so a generated NPC arrives with knowledge the player
+    # can learn from them. Only meaningful for kind "character".
+    knowledge: List[KnowledgeEntry] = []
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -170,3 +234,7 @@ class TurnResponse(BaseModel):
     referrals: List[Referral] = []
     claims: List[Claim] = []
     memory_update: List[str] = []
+    # The ids of this NPC's knowledge entries it shared with the player
+    # this turn (§14, slice 6). The engine validates them against the
+    # NPC's actual set — a claim the engine can check, unlike free text.
+    knowledge_shared: List[str] = []

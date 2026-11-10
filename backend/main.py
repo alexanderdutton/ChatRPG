@@ -17,6 +17,7 @@ from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world, game_world
 from .claims_validation import (add_tool_results,
                                 build_prompt_grounded_set, validate_turn)
+from .knowledge import knowledge_modifiers, learn_knowledge, validate_shared
 from .write_back import commit_new_entities
 from .gemini_service import get_gemini_response, get_structured_turn, get_structured_turn_with_tools, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
@@ -230,12 +231,48 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
     quest_history = game_state_manager.get_quest_context_for_npc(session_id)
     quest_context = f"Quest Log (Active & Completed): {json.dumps(quest_history)}"
 
+    # Knowledge the NPC holds (slice 6, §23): what it knows, with
+    # provenance. The NPC asserts only what is on this list; anything
+    # else it refers or admits not knowing. When it shares an entry
+    # with the player, it lists the entry's id in knowledge_shared.
+    npc_knowledge = npc_info.get("knowledge") or []
+    knowledge_context = ""
+    if npc_knowledge:
+        lines = []
+        for entry in npc_knowledge:
+            lines.append(
+                f"- [{entry.get('id')}] ({entry.get('topic')}) "
+                f"{entry.get('fact')} "
+                f"(learned: {entry.get('source')}, "
+                f"confidence: {entry.get('confidence')})")
+        knowledge_context = (
+            "What you know — assert only these facts, in your own "
+            "words, and mark anything you reason from them as an "
+            "inference, never as fact. When you share one with the "
+            "player, list its id in knowledge_shared:\n" + "\n".join(lines))
+
+    # Referrals that sent the player to this NPC (slice 6): the NPC
+    # knows why the player came. Followed referrals stay in the list
+    # — that is why they came, even after they arrived — and the
+    # followed flag is what tells the engine the chain completed.
+    referral_context = ""
+    pending = game_state_manager.get_pending_referrals(session_id)
+    mine = [r for r in pending if r.get("to_name") == npc_info["name"]]
+    if mine:
+        referral_context = (
+            "The player was sent to you: " + "; ".join(
+                f"{r.get('from_npc')} sent them because "
+                f"{r.get('reason') or 'they thought you would know'}"
+                for r in mine) + ".")
+
     system_instruction = (f"You are {npc_info['name']}. "
                           f"You are talking to {player_name}. "
                           f"{location_context} "
                           f"{npc_info['personality_prompt']} "
                           f"{memory_context} "
                           f"{quest_context} "
+                          f"{knowledge_context} "
+                          f"{referral_context} "
                           f"{challenge_prompt}")
     return system_instruction
 
@@ -353,8 +390,25 @@ async def interact_with_npc(user_input: UserInput):
             logger.warning(f"Dropping invalid skill check: {sc_errors}")
             metadata.pop("skill_check")
         else:
-            metadata["skill_check"]["dc"] = assign_dc(
-                difficulty=metadata["skill_check"].get("difficulty"))
+            # Knowledge modifiers (slice 6, §23): what the player has
+            # learned about the check's subject lowers the DC — and
+            # because the rollability decision runs after the DC is
+            # assigned, investigation can move a check into the
+            # rollable band.
+            ledger = game_state_manager.get_learned_knowledge(session_id)
+            sc = metadata["skill_check"]
+            modifiers = knowledge_modifiers(
+                ledger,
+                subjects=[sc["subject"]] if sc.get("subject") else None,
+                check_type=sc.get("type"),
+                description=sc.get("description", ""))
+            sc["dc"] = assign_dc(
+                difficulty=sc.get("difficulty"),
+                modifiers=modifiers or None)
+            if modifiers:
+                sc["knowledge_modifiers"] = modifiers
+                logger.info(
+                    f"Knowledge modifiers on skill check: {modifiers}")
     
     # Handle Quest Offer
     if "quest_offered" in metadata:
@@ -387,9 +441,21 @@ async def interact_with_npc(user_input: UserInput):
                 # Engine assigns every DC (slice 1): the model proposes a
                 # tier or a difficulty label, never a number.
                 player_stats = game_state_manager.get_player_stats(session_id)
+                ledger = game_state_manager.get_learned_knowledge(session_id)
                 for ch in quest_data.get('challenges', []):
+                    # Knowledge modifiers (slice 6, §23): the challenge
+                    # is about the quest's involved entities — what the
+                    # player has learned about them lowers the DC.
+                    ch_modifiers = knowledge_modifiers(
+                        ledger,
+                        subjects=quest_data.get('involved_entities', []),
+                        check_type=ch.get('type'),
+                        description=ch.get('description', ''))
                     ch['dc'] = assign_dc(tier=ch.get('tier'),
-                                         difficulty=ch.get('difficulty'))
+                                         difficulty=ch.get('difficulty'),
+                                         modifiers=ch_modifiers or None)
+                    if ch_modifiers:
+                        ch['knowledge_modifiers'] = ch_modifiers
                     ch['quest_id'] = quest_data['id']
 
                     stat_key = ch['type'].lower()
@@ -479,6 +545,30 @@ async def interact_with_npc(user_input: UserInput):
     if turn.referrals:
         logger.info(
             f"Referrals: {[(r.to_name, r.reason) for r in turn.referrals]}")
+        # Referrals recorded (slice 6, §23): who the player was sent
+        # to, so the referred NPC knows why they came — and so the
+        # engine can mark the referral followed when the player
+        # arrives. Deduped by name; the dice benefit comes from the
+        # knowledge learned, not the referral itself. The name is
+        # resolved to the character's id at recording time (Ellie
+        # review, finding 3): a generated NPC's id can be suffixed on
+        # collision, so a name-only record would never match a
+        # follow-up given by id.
+        pending = game_state_manager.get_pending_referrals(session_id)
+        known = {r.get("to_name") for r in pending}
+        for ref in turn.referrals:
+            if ref.to_name not in known:
+                pending.append({
+                    "to_name": ref.to_name,
+                    "to_id": game_state_manager.resolve_npc_id(ref.to_name),
+                    "to_kind": ref.to_kind,
+                    "reason": ref.reason,
+                    "from_npc": npc_info["name"],
+                    "turn": turn_number,
+                    "followed": False,
+                })
+                known.add(ref.to_name)
+        game_state_manager.set_pending_referrals(session_id, pending)
     if turn.memory_update:
         memory = list(npc_state.get("memory", []))
         for note in turn.memory_update:
@@ -486,6 +576,28 @@ async def interact_with_npc(user_input: UserInput):
                 memory.append(note)
         game_state_manager.update_npc_state(session_id, npc_id, {"memory": memory})
         logger.info(f"Memory updated for {npc_info['name']}: {turn.memory_update}")
+
+    # Knowledge shared this turn (slice 6, §23): the engine checks the
+    # ids against what the NPC actually knows, and the validated ones
+    # join the player's ledger — a claim the engine can check, unlike
+    # free text.
+    shared_valid, shared_unknown = validate_shared(
+        turn.knowledge_shared, npc_info.get("knowledge") or [])
+    if shared_unknown:
+        logger.warning(
+            f"{npc_info['name']} claimed to share knowledge it does "
+            f"not have: {shared_unknown}")
+    if shared_valid:
+        ledger = game_state_manager.get_learned_knowledge(session_id)
+        updated, newly = learn_knowledge(
+            ledger, shared_valid, learned_from=npc_info["name"],
+            turn_number=turn_number, session_id=session_id)
+        game_state_manager.set_learned_knowledge(session_id, updated)
+        metadata["knowledge_learned"] = [
+            {"id": e["id"], "topic": e.get("topic")} for e in newly]
+        logger.info(
+            f"Player learned from {npc_info['name']}: "
+            f"{[e['id'] for e in newly]}")
 
     game_state_manager.process_metadata(session_id, metadata)
     conversation_history.append({"role": "model", "parts": [gemini_dialogue]})
@@ -712,6 +824,10 @@ async def handle_command(command_input: CommandInput):
     if command_input.command.lower().startswith("talk to "):
         npc_id = game_state_manager.get_conversation_partner(session_id)
         if npc_id:
+            # A referral followed (slice 6, §23): the player arrived
+            # at the NPC they were sent to.
+            if game_state_manager.mark_referral_followed(session_id, npc_id):
+                logger.info(f"Referral to {npc_id} followed.")
             npc_info = game_state_manager.get_npc_info(npc_id)
             npc_state = game_state_manager.get_npc_state(session_id, npc_id)
             npc_greetings = npc_state.get("greetings", [])

@@ -29,24 +29,21 @@ from backend.game_world import game_world, initialize_game_world
 
 class TestWriteBackTurn(unittest.TestCase):
     def setUp(self):
+        # Import main first: it initializes the shipped world at
+        # import time, which would silently reset a scratch world
+        # loaded before it (slice 6 catch — a test commit landed
+        # Corvin in Elodia.json this way).
+        from fastapi.testclient import TestClient
+        from backend.main import app
         self.worlds_dir = os.path.abspath(os.path.join(
             os.path.dirname(__file__), '..', 'worlds'))
         self.scratch = os.path.join(self.worlds_dir, "TestWriteback.json")
         shutil.copy(os.path.join(self.worlds_dir, "Elodia.json"),
                     self.scratch)
-        # Rename the world inside the file, so the default save path
-        # (derived from the world name) is the scratch file.
-        with open(self.scratch) as f:
-            data = json.load(f)
-        data["world"] = "TestWriteback"
-        with open(self.scratch, "w") as f:
-            json.dump(data, f, indent=4)
         initialize_game_world("TestWriteback")
         self.gsm = GameStateManager()
         self.session_id = "test_session_write_back_turn"
         self.gsm.create_session(self.session_id, "TestPlayer")
-        from fastapi.testclient import TestClient
-        from backend.main import app
         self.client = TestClient(app)
         talk = self.client.post("/command", json={
             "session_id": self.session_id, "command": "talk to Elara"})

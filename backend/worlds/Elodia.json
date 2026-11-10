@@ -49,7 +49,50 @@
                     "personality_prompt": "Elara is kind and helpful, but also cautious and wise. She speaks in a gentle, reassuring tone, offering advice and remedies to those who seek her help.  She is deeply connected to nature and values balance and harmony.",
                     "x": 1,
                     "y": 2,
-                    "short_description": "A kind herbalist with silver hair."
+                    "short_description": "A kind herbalist with silver hair.",
+                    "knowledge": [
+                        {
+                            "id": "elara-k1",
+                            "topic": "moonpetal",
+                            "fact": "The moonpetal is disappearing from the glade \u2014 fewer flowers each week.",
+                            "source": "saw",
+                            "confidence": "high",
+                            "dc_modifier": 0
+                        },
+                        {
+                            "id": "elara-k2",
+                            "topic": "moonpetal",
+                            "fact": "Someone is taking the moonpetal, roots and all \u2014 the patches are torn, not picked.",
+                            "source": "saw",
+                            "confidence": "high",
+                            "dc_modifier": 0
+                        },
+                        {
+                            "id": "elara-k3",
+                            "topic": "Corvin",
+                            "fact": "A name heard in the market: Corvin, a poacher working the woods south of town.",
+                            "source": "heard_from",
+                            "confidence": "medium",
+                            "dc_modifier": 0
+                        },
+                        {
+                            "id": "elara-k4",
+                            "topic": "Joren",
+                            "fact": "Joren the trapper has seen the man \u2014 he works the deep woods and comes to market on rest days.",
+                            "source": "heard_from",
+                            "confidence": "medium",
+                            "dc_modifier": 0
+                        },
+                        {
+                            "id": "elara-k5",
+                            "topic": "Corvin",
+                            "fact": "What the taking costs the town: without moonpetal there are no fever remedies and no wound salves, and the town has no other source.",
+                            "source": "saw",
+                            "confidence": "high",
+                            "dc_modifier": -5,
+                            "applies_to": "charisma"
+                        }
+                    ]
                 },
                 {
                     "name": "Brom",
@@ -59,7 +102,25 @@
                     "personality_prompt": "Brom is gruff but ultimately good-hearted. He values honesty and hard work above all else. He's quick to offer a helping hand, but equally quick to criticize shoddy work.",
                     "x": 4,
                     "y": 3,
-                    "short_description": "A burly dwarf blacksmith."
+                    "short_description": "A burly dwarf blacksmith.",
+                    "knowledge": [
+                        {
+                            "id": "brom-k1",
+                            "topic": "smithy",
+                            "fact": "The smithy forges the town's tools and horseshoes; the forge has burned every day for twenty years.",
+                            "source": "saw",
+                            "confidence": "high",
+                            "dc_modifier": 0
+                        },
+                        {
+                            "id": "brom-k2",
+                            "topic": "Oakhaven",
+                            "fact": "The old watermill's iron fittings are Brom's work \u2014 he knows every hinge and hasp in town.",
+                            "source": "saw",
+                            "confidence": "high",
+                            "dc_modifier": 0
+                        }
+                    ]
                 }
             ]
         }

@@ -207,6 +207,15 @@ class GameStateManager:
         except sqlite3.OperationalError:
             pass # Column likely already exists
 
+        # Knowledge ledger + pending referrals (slice 6, §23): what the
+        # player has learned this session, and who they were sent to.
+        for column in ("learned_knowledge", "pending_referrals"):
+            try:
+                cursor.execute(
+                    f"ALTER TABLE sessions ADD COLUMN {column} TEXT DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass # Column likely already exists
+
         # Attempt to add response columns to quests table (migration)
         try:
             cursor.execute("ALTER TABLE quests ADD COLUMN accept_response TEXT")
@@ -475,12 +484,15 @@ class GameStateManager:
         if row:
             data = dict(row)
             # Deserialize JSON fields
-            for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history']:
-                if data[field]:
+            for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
+                          'learned_knowledge', 'pending_referrals']:
+                if data.get(field):
                     try:
                         data[field] = json.loads(data[field])
                     except json.JSONDecodeError:
                         data[field] = [] if field != 'npc_states' else {}
+                elif field in ('learned_knowledge', 'pending_referrals'):
+                    data[field] = []
             return data
         return None
 
@@ -489,7 +501,8 @@ class GameStateManager:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history']:
+        if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
+                     'learned_knowledge', 'pending_referrals']:
             value = json.dumps(value)
             
         cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
@@ -579,6 +592,62 @@ class GameStateManager:
         """Retrieves the player's current location name for a given session."""
         data = self._get_session_data(session_id)
         return data.get("current_location_name", "Unknown Location") if data else "Unknown Location"
+
+    # -- Knowledge ledger + pending referrals (slice 6, §23) --------------
+    # The ledger is what the player has learned this session (snapshots
+    # of knowledge entries with provenance); referrals are who the
+    # player was sent to and whether they followed up. Both are
+    # session-scoped by design — what the player knows does not persist
+    # across playthroughs.
+
+    def get_learned_knowledge(self, session_id: str) -> List[Dict[str, Any]]:
+        data = self._get_session_data(session_id)
+        return data.get("learned_knowledge") or [] if data else []
+
+    def set_learned_knowledge(self, session_id: str,
+                              ledger: List[Dict[str, Any]]):
+        self._update_session_field(session_id, "learned_knowledge", ledger)
+
+    def get_pending_referrals(self, session_id: str) -> List[Dict[str, Any]]:
+        data = self._get_session_data(session_id)
+        return data.get("pending_referrals") or [] if data else []
+
+    def set_pending_referrals(self, session_id: str,
+                              referrals: List[Dict[str, Any]]):
+        self._update_session_field(session_id, "pending_referrals", referrals)
+
+    def resolve_npc_id(self, identifier: str) -> str:
+        """Resolve a name-or-id to the character's id, when the world
+        knows it (Ellie review, finding 3). The codebase calls the
+        conversation partner an "id" while the value is a name, and a
+        generated NPC's id can be suffixed on collision ("brom-2") —
+        so a referral recorded by name and a follow-up given by id
+        would never meet. Both sides resolve through here; an unknown
+        identifier comes back unchanged."""
+        for loc_chars in game_world.characters.values():
+            for name, char in loc_chars.items():
+                if name == identifier or (char.id and char.id == identifier):
+                    return char.id or name
+        return identifier
+
+    def mark_referral_followed(self, session_id: str, partner: str) -> bool:
+        """Mark the pending referral to `partner` as followed. The
+        partner may be a name or an id; the referral matches by id
+        when both sides resolved, and by name otherwise. Returns True
+        when a pending referral was found."""
+        partner_id = self.resolve_npc_id(partner)
+        referrals = self.get_pending_referrals(session_id)
+        followed = False
+        for ref in referrals:
+            if ref.get("followed"):
+                continue
+            if (ref.get("to_id") == partner_id
+                    or ref.get("to_name") == partner):
+                ref["followed"] = True
+                followed = True
+        if followed:
+            self.set_pending_referrals(session_id, referrals)
+        return followed
 
     def get_world_name(self) -> str:
         """Retrieves the current world name."""
@@ -1503,27 +1572,42 @@ class GameStateManager:
         # 1. Check Game World (Static)
         # 2. Check NPC States (Dynamic)
         # 3. Check Entity Stubs (Dynamic)
-        
+
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        for entity_id in entities:
-            # Check if known in game world
-            if game_world.get_character(entity_id) or game_world.get_location(entity_id):
-                continue
-                
-            # Check if exists in stubs
-            cursor.execute("SELECT 1 FROM entity_stubs WHERE id = ? AND session_id = ?", (entity_id, session_id))
-            if cursor.fetchone():
-                continue
-                
-            # Create Stub
-            stub_name = entity_id.replace("_", " ").title()
-            cursor.execute('''
-                INSERT INTO entity_stubs (id, session_id, name, type, status, needs_expansion)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (entity_id, session_id, stub_name, "unknown", "mentioned", True))
-            logger.info(f"Created entity stub for: {entity_id}")
-            
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+
+            for entity_id in entities:
+                # Check if known in game world
+                if game_world.get_character(entity_id) or game_world.get_location(entity_id):
+                    continue
+
+                # Check if exists in stubs. The check is by id ALONE:
+                # entity_stubs.id is the PRIMARY KEY (global, not
+                # per-session), so a stub created by another session
+                # already satisfies it. Checking id AND session_id
+                # passed for a second session and the INSERT then
+                # violated the key (PR #6 + #7 integration failure,
+                # 2026-11-09: 22 failed on the merged branch, each
+                # branch green alone). INSERT OR IGNORE is the
+                # belt-and-braces guard for the same reason.
+                cursor.execute("SELECT 1 FROM entity_stubs WHERE id = ?",
+                               (entity_id,))
+                if cursor.fetchone():
+                    continue
+
+                # Create Stub
+                stub_name = entity_id.replace("_", " ").title()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO entity_stubs (id, session_id, name, type, status, needs_expansion)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (entity_id, session_id, stub_name, "unknown", "mentioned", True))
+                logger.info(f"Created entity stub for: {entity_id}")
+
+            conn.commit()
+        finally:
+            # Always release the connection: an error above used to
+            # leave it open with a failed transaction, and the held
+            # lock cascaded into "database is locked" for the rest of
+            # the run.
+            conn.close()

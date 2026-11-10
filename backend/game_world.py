@@ -13,6 +13,12 @@ class GameWorld:
     def __init__(self):
         self.name: str | None = None
         self.description: str | None = None
+        # The file this world was loaded from. The save path is derived
+        # from it, not from the world's name: the name comes from the
+        # file's content, so a scratch copy renamed on disk would
+        # otherwise save back into the shipped file (slice 6 catch —
+        # a test commit landed Corvin in Elodia.json this way).
+        self.file_path: str | None = None
         self.locations: Dict[str, Location] = {}
         self.characters: Dict[str, Dict[str, Character]] = {}
 
@@ -60,6 +66,7 @@ def initialize_game_world(world_name: str | None = None):
 
     # Load from a specific world file
     file_path = os.path.join(os.path.dirname(__file__), "worlds", f"{world_name}.json")
+    game_world.file_path = file_path
     try:
         with open(file_path, 'r') as f:
             game_data_dict = json.load(f)
@@ -138,8 +145,11 @@ def save_world(world_file: str | None = None) -> str:
         raise ValueError("No world loaded; cannot save.")
 
     if world_file is None:
-        world_file = os.path.join(os.path.dirname(__file__), "worlds",
-                                  f"{game_world.name}.json")
+        # Default to the file this world was loaded from — not a path
+        # rebuilt from the world's name, which comes from the file's
+        # content and can disagree with the filename (see GameWorld).
+        world_file = game_world.file_path or os.path.join(
+            os.path.dirname(__file__), "worlds", f"{game_world.name}.json")
 
     locations = []
     for loc in game_world.locations.values():
