@@ -51,14 +51,16 @@ class KnowledgeEntry(BaseModel):
     """One thing an NPC knows, as world state with provenance (§14).
 
     `source` is in-world provenance — how the NPC learned it. `confidence`
-    is how sure the NPC is. Both are recorded and shown to the model, but
-    neither changes the modifier yet; that is the gossip layer, deferred.
-    `dc_modifier` is what the player knowing this fact does to a check
-    about its `topic` (usually negative — knowledge makes the check
-    easier); `applies_to` scopes it to one challenge type, or None for
-    any type about the topic. Modifiers are clamped to [-10, 10] rather
-    than voiding a turn. `id` is optional: the engine assigns one when
-    a generated NPC's knowledge omits it.
+    is how sure the NPC is. Confidence now scales the modifier (slice 7,
+    §24: high in full, medium halved, low nothing); `source` is what the
+    rumor-reconciliation gate reads — only a "saw" fact at high
+    confidence counts as truth-grade. `dc_modifier` is what the player
+    knowing this fact does to a check about its `topic` (usually
+    negative — knowledge makes the check easier); `applies_to` scopes
+    it to one challenge type, or None for any type about the topic.
+    Modifiers are clamped to [-10, 10] rather than voiding a turn.
+    `id` is optional: the engine assigns one when a generated NPC's
+    knowledge omits it.
     """
     id: Optional[str] = None
     topic: str
