@@ -17,7 +17,9 @@ from .game_state_manager import GameStateManager
 from .game_world import initialize_game_world, game_world
 from .claims_validation import (add_tool_results,
                                 build_prompt_grounded_set, validate_turn)
-from .knowledge import knowledge_modifiers, learn_knowledge, validate_shared
+from .knowledge import (add_rumor_records, knowledge_modifier_breakdown,
+                        knowledge_modifiers, learn_knowledge, record_rumors,
+                        reconcile_rumors, validate_shared)
 from .write_back import commit_new_entities
 from .gemini_service import get_gemini_response, get_structured_turn, get_structured_turn_with_tools, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
@@ -248,7 +250,10 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
         knowledge_context = (
             "What you know — assert only these facts, in your own "
             "words, and mark anything you reason from them as an "
-            "inference, never as fact. When you share one with the "
+            "inference, never as fact. Entries marked low confidence "
+            "are gossip — something you heard, not something you saw: "
+            "say so in character, and mark them rumor in claims. "
+            "When you share one with the "
             "player, list its id in knowledge_shared:\n" + "\n".join(lines))
 
     # Referrals that sent the player to this NPC (slice 6): the NPC
@@ -409,6 +414,16 @@ async def interact_with_npc(user_input: UserInput):
                 sc["knowledge_modifiers"] = modifiers
                 logger.info(
                     f"Knowledge modifiers on skill check: {modifiers}")
+            # Reliability breakdown (slice 7, §24): what each learned
+            # entry contributed and why — including the entries that
+            # contributed nothing because they were too shaky to help.
+            breakdown = knowledge_modifier_breakdown(
+                ledger,
+                subjects=[sc["subject"]] if sc.get("subject") else None,
+                check_type=sc.get("type"),
+                description=sc.get("description", ""))
+            if breakdown:
+                sc["knowledge_breakdown"] = breakdown
     
     # Handle Quest Offer
     if "quest_offered" in metadata:
@@ -456,6 +471,14 @@ async def interact_with_npc(user_input: UserInput):
                                          modifiers=ch_modifiers or None)
                     if ch_modifiers:
                         ch['knowledge_modifiers'] = ch_modifiers
+                    # Reliability breakdown (slice 7, §24), as above.
+                    ch_breakdown = knowledge_modifier_breakdown(
+                        ledger,
+                        subjects=quest_data.get('involved_entities', []),
+                        check_type=ch.get('type'),
+                        description=ch.get('description', ''))
+                    if ch_breakdown:
+                        ch['knowledge_breakdown'] = ch_breakdown
                     ch['quest_id'] = quest_data['id']
 
                     stat_key = ch['type'].lower()
@@ -587,17 +610,38 @@ async def interact_with_npc(user_input: UserInput):
         logger.warning(
             f"{npc_info['name']} claimed to share knowledge it does "
             f"not have: {shared_unknown}")
+    newly_learned: List[Dict[str, Any]] = []
     if shared_valid:
         ledger = game_state_manager.get_learned_knowledge(session_id)
-        updated, newly = learn_knowledge(
+        updated, newly_learned = learn_knowledge(
             ledger, shared_valid, learned_from=npc_info["name"],
             turn_number=turn_number, session_id=session_id)
         game_state_manager.set_learned_knowledge(session_id, updated)
         metadata["knowledge_learned"] = [
-            {"id": e["id"], "topic": e.get("topic")} for e in newly]
+            {"id": e["id"], "topic": e.get("topic")} for e in newly_learned]
         logger.info(
             f"Player learned from {npc_info['name']}: "
-            f"{[e['id'] for e in newly]}")
+            f"{[e['id'] for e in newly_learned]}")
+
+    # Gossip with reliability (slice 7, §24): rumor claims are
+    # recorded with the engine's verdict — the dialogue stands even
+    # when the rumor is false, that is diegetic fallibility — and a
+    # truth-grade fact learned this turn can correct or confirm an
+    # open record. Recorded whether or not anything was learned:
+    # gossip is its own channel, not a side effect of learning.
+    new_rumors = record_rumors(validation, npc_info["name"], turn_number)
+    rumor_records = game_state_manager.get_rumor_records(session_id)
+    rumor_records, added_rumors = add_rumor_records(
+        rumor_records, new_rumors)
+    rumor_records, rumor_flips = reconcile_rumors(
+        rumor_records, newly_learned)
+    game_state_manager.set_rumor_records(session_id, rumor_records)
+    if added_rumors:
+        metadata["rumors"] = added_rumors
+        logger.info(f"Rumors recorded: {added_rumors}")
+    if rumor_flips:
+        metadata["rumor_updates"] = rumor_flips
+        logger.info(f"Rumors corrected/confirmed: {rumor_flips}")
 
     game_state_manager.process_metadata(session_id, metadata)
     conversation_history.append({"role": "model", "parts": [gemini_dialogue]})
