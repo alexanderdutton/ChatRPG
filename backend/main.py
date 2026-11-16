@@ -18,6 +18,7 @@ from .game_world import initialize_game_world, game_world
 from .claims_validation import (add_tool_results,
                                 build_prompt_grounded_set, validate_turn)
 from .knowledge import knowledge_modifiers, learn_knowledge, validate_shared
+from .simulation import format_clock, is_present, time_of_day
 from .write_back import commit_new_entities
 from .gemini_service import get_gemini_response, get_structured_turn, get_structured_turn_with_tools, generate_game_data, generate_npc_memory_update, CHALLENGE_SYSTEM_PROMPT, validate_quest_output, validate_skill_check_proposal, assign_dc
 from .llm_provider import (get_provider, get_provider_mode, override_provider,
@@ -188,6 +189,13 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
     if npc_x is not None and npc_y is not None:
         bindings_parts[0] += f" at ({npc_x}, {npc_y})"
     bindings_parts[0] += "."
+    # World time (§25, slice 8): the clock is part of what is true
+    # here, so the model can narrate the hour instead of inventing
+    # one. The greeting turn has no clock line -- it is built before
+    # any turn resolves.
+    clock = game_state_manager.get_clock(session_id)
+    bindings_parts.append(
+        f"It is {format_clock(clock)} ({time_of_day(clock['hour'])}).")
     bindings_parts.append(f"The player is in {current_location_name} with you.")
     if location_obj is not None:
         exits = [f"{d} to {dest}" for d, dest in location_obj.exits.items() if dest]
@@ -197,7 +205,14 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
         if location_obj.features:
             bindings_parts.append(
                 "Features here: " + ", ".join(f.name for f in location_obj.features) + ".")
-        others = [c for c in location_obj.characters if c.name != npc_info['name']]
+        # Schedules (§25, slice 8): "Others here" lists only NPCs
+        # whose schedule puts them here at the current hour. The
+        # conversation partner is exempt -- they are present by
+        # definition, because the player walked up to them.
+        others = [c for c in location_obj.characters
+                  if c.name != npc_info['name']
+                  and is_present(c.dict(), current_location_name,
+                                 clock["hour"], current_location_name)]
         if others:
             bindings_parts.append(
                 "Others here: " + ", ".join(f"{c.name} ({c.x}, {c.y})" for c in others) + ".")
@@ -608,7 +623,13 @@ async def interact_with_npc(user_input: UserInput):
     game_state_manager.update_conversation_history(session_id, conversation_history)
     logger.info(f"Conversation history after adding Gemini response: {conversation_history}")
 
-    
+    # A resolved turn costs an hour (§25, slice 8): the world keeps
+    # time while the player talks. The greeting branch above returns
+    # early and does not tick -- the greeting starts the conversation,
+    # it is not a resolved turn. The tick log rides in the metadata
+    # so the turn's time cost is visible, not silent.
+    tick_log = game_state_manager.advance_clock(session_id)
+    metadata["tick"] = tick_log
 
     # Portrait Logic
     portrait_path = f"frontend/portraits/{npc_id}.png"

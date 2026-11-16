@@ -4,6 +4,7 @@ import os
 from typing import Dict, List, Any, Optional, Tuple
 from .game_world import game_world
 from .gemini_service import generate_item_details, generate_quest, DIFFICULTY_TABLE
+from .simulation import advance_tick, is_present, new_clock
 import logging
 
 logger = logging.getLogger(__name__)
@@ -215,6 +216,14 @@ class GameStateManager:
                     f"ALTER TABLE sessions ADD COLUMN {column} TEXT DEFAULT '[]'")
             except sqlite3.OperationalError:
                 pass # Column likely already exists
+
+        # Clock (slice 8, §25): world time per session, JSON
+        # {"day": 1, "hour": 8}. Sessions created before this column
+        # existed read as None and default to a fresh clock.
+        try:
+            cursor.execute("ALTER TABLE sessions ADD COLUMN clock TEXT")
+        except sqlite3.OperationalError:
+            pass # Column likely already exists
 
         # Attempt to add response columns to quests table (migration)
         try:
@@ -485,7 +494,7 @@ class GameStateManager:
             data = dict(row)
             # Deserialize JSON fields
             for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
-                          'learned_knowledge', 'pending_referrals']:
+                          'learned_knowledge', 'pending_referrals', 'clock']:
                 if data.get(field):
                     try:
                         data[field] = json.loads(data[field])
@@ -502,7 +511,7 @@ class GameStateManager:
         cursor = conn.cursor()
         
         if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
-                     'learned_knowledge', 'pending_referrals']:
+                     'learned_knowledge', 'pending_referrals', 'clock']:
             value = json.dumps(value)
             
         cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
@@ -603,6 +612,29 @@ class GameStateManager:
     def get_learned_knowledge(self, session_id: str) -> List[Dict[str, Any]]:
         data = self._get_session_data(session_id)
         return data.get("learned_knowledge") or [] if data else []
+
+    def get_clock(self, session_id: str) -> Dict[str, int]:
+        """World time for this session (§25, slice 8). Sessions
+        created before the clock column existed read as None and
+        start fresh: Day 1, 08:00. A corrupt value also falls back
+        to fresh rather than failing the turn."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return new_clock()
+        clock = data.get("clock") or new_clock()
+        try:
+            return {"day": int(clock["day"]), "hour": int(clock["hour"])}
+        except (KeyError, TypeError, ValueError):
+            return new_clock()
+
+    def advance_clock(self, session_id: str, hours: int = 1) -> List[Dict[str, Any]]:
+        """One tick for this session: advance the clock, persist it,
+        return the tick log. Slice 8 logs only the clock; later
+        slices append their effects to the same log."""
+        clock = self.get_clock(session_id)
+        new, log = advance_tick(clock, hours)
+        self._update_session_field(session_id, "clock", new)
+        return log
 
     def set_learned_knowledge(self, session_id: str,
                               ledger: List[Dict[str, Any]]):
@@ -799,7 +831,13 @@ class GameStateManager:
 
         self._update_session_field(session_id, "player_x", new_x)
         self._update_session_field(session_id, "player_y", new_y)
-        
+
+        # A successful move costs an hour (§25, slice 8): the world
+        # keeps time while the player walks. A bumped nose -- a wall
+        # or the map edge -- costs nothing; the checks above return
+        # before this line.
+        self.advance_clock(session_id)
+
         # Refresh session data after update
         session = self._get_session_data(session_id)
 
@@ -858,6 +896,9 @@ class GameStateManager:
                     new_location = game_world.get_location(exit_location_name)
                     if new_location:
                         self.set_current_location_name(session_id, exit_location_name)
+                        # Leaving through an exit costs an hour (§25,
+                        # slice 8): travel takes time.
+                        self.advance_clock(session_id)
                         return f"You enter {new_location.name}. {new_location.description}"
             return "There are no accessible exits from your current position."
         else:
@@ -1070,7 +1111,12 @@ class GameStateManager:
         current_location_name = session.get("current_location_name")
         player_x = session.get("player_x", 0)
         player_y = session.get("player_y", 0)
-        
+
+        # Schedules (§25, slice 8): an NPC is only findable here if
+        # their schedule puts them here at the current hour -- or
+        # they have no schedule and this is home.
+        hour = self.get_clock(session_id)["hour"]
+
         npcs_here = []
         logger.info(f"Checking for NPCs in location: {current_location_name}")
 
@@ -1078,6 +1124,9 @@ class GameStateManager:
             if npc_state["location"] == current_location_name:
                 npc_info = self.get_npc_info(npc_id)
                 if npc_info:
+                    if not is_present(npc_info, current_location_name,
+                                      hour, npc_state["location"]):
+                        continue
                     dist = abs(npc_state['x'] - player_x) + abs(npc_state['y'] - player_y)
                     # Only include NPCs that are in the same tile or adjacent (distance <= 1)
                     if dist <= 1:
@@ -1107,13 +1156,24 @@ class GameStateManager:
         player_x = session["player_x"]
         player_y = session["player_y"]
 
+        # Schedules (§25, slice 8): the map shows only NPCs whose
+        # schedule puts them here at the current hour. Computed once
+        # up front -- the tile loop below is per-cell.
+        hour = self.get_clock(session_id)["hour"]
+        present_here = {
+            npc_id for npc_id, npc_state in session["npc_states"].items()
+            if npc_state["location"] == location_name and is_present(
+                self.get_npc_info(npc_id), location_name, hour,
+                npc_state["location"])
+        }
+
         map_grid = []
         for r_idx, row in enumerate(location.raw_layout):
             display_row = []
             for c_idx, cell in enumerate(row):
                 has_npc = False
                 for npc_id, npc_state in session["npc_states"].items():
-                    if (npc_state["location"] == location_name and
+                    if (npc_id in present_here and
                         npc_state["x"] == c_idx and
                         npc_state["y"] == r_idx):
                         has_npc = True

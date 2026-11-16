@@ -97,6 +97,16 @@ class KnowledgeEntry(BaseModel):
             return max(-10, min(10, n))
         return n
 
+class ScheduleEntry(BaseModel):
+    # One row of an NPC's daily schedule (§25, slice 8): where the NPC
+    # is between start (inclusive) and end (exclusive), in hours 0-23.
+    # A range with start > end wraps midnight (22 -> 6). The engine
+    # reads this, never the model; a gap means home.
+    start: int
+    end: int
+    location: str
+
+
 class Character(BaseModel):
     # `id` and `provenance` are engine-set at commit time (slice 5,
     # write-back, §22). Shipped entities keep both as None and their
@@ -116,6 +126,10 @@ class Character(BaseModel):
     # Seeded in the world file for shipped NPCs; committed with the
     # character for generated ones.
     knowledge: List[KnowledgeEntry] = []
+    # Where this NPC is, by hour (§25, slice 8). Optional, default
+    # None -- not [] -- so save_world's exclude_none round-trip leaves
+    # the shipped file byte-stable for characters without one.
+    schedule: Optional[List[ScheduleEntry]] = None
 
 class Location(BaseModel):
     # See Character: `id` and `provenance` are engine-set at commit.
