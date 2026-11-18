@@ -4,7 +4,7 @@ import os
 from typing import Dict, List, Any, Optional, Tuple
 from .game_world import game_world
 from .gemini_service import generate_item_details, generate_quest, DIFFICULTY_TABLE
-from .simulation import advance_tick, is_present, new_clock
+from .simulation import advance_agendas, advance_tick, is_present, new_clock
 import logging
 
 logger = logging.getLogger(__name__)
@@ -222,6 +222,22 @@ class GameStateManager:
         # existed read as None and default to a fresh clock.
         try:
             cursor.execute("ALTER TABLE sessions ADD COLUMN clock TEXT")
+        except sqlite3.OperationalError:
+            pass # Column likely already exists
+
+        # Agenda progress + world facts (slice 9, §25): per-session
+        # agenda state {"npc": {"current", "elapsed", "done"}} and
+        # the facts the tick engine has produced, both JSON. The
+        # defaults backfill sessions created before these columns
+        # existed.
+        try:
+            cursor.execute(
+                "ALTER TABLE sessions ADD COLUMN agenda_state TEXT DEFAULT '{}'")
+        except sqlite3.OperationalError:
+            pass # Column likely already exists
+        try:
+            cursor.execute(
+                "ALTER TABLE sessions ADD COLUMN world_facts TEXT DEFAULT '[]'")
         except sqlite3.OperationalError:
             pass # Column likely already exists
 
@@ -494,14 +510,17 @@ class GameStateManager:
             data = dict(row)
             # Deserialize JSON fields
             for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
-                          'learned_knowledge', 'pending_referrals', 'clock']:
+                          'learned_knowledge', 'pending_referrals', 'clock',
+                          'agenda_state', 'world_facts']:
                 if data.get(field):
                     try:
                         data[field] = json.loads(data[field])
                     except json.JSONDecodeError:
                         data[field] = [] if field != 'npc_states' else {}
-                elif field in ('learned_knowledge', 'pending_referrals'):
+                elif field in ('learned_knowledge', 'pending_referrals', 'world_facts'):
                     data[field] = []
+                elif field == 'agenda_state':
+                    data[field] = {}
             return data
         return None
 
@@ -511,7 +530,8 @@ class GameStateManager:
         cursor = conn.cursor()
         
         if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
-                     'learned_knowledge', 'pending_referrals', 'clock']:
+                     'learned_knowledge', 'pending_referrals', 'clock',
+                     'agenda_state', 'world_facts']:
             value = json.dumps(value)
             
         cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
@@ -629,12 +649,104 @@ class GameStateManager:
 
     def advance_clock(self, session_id: str, hours: int = 1) -> List[Dict[str, Any]]:
         """One tick for this session: advance the clock, persist it,
-        return the tick log. Slice 8 logs only the clock; later
-        slices append their effects to the same log."""
+        return the tick log. Slice 8 logs only the clock; slice 9
+        appends agenda effects to the same log. The simulation only
+        describes effects -- this method applies them: a move
+        relocates the NPC in npc_states, a fact is recorded in
+        world_facts with its provenance."""
         clock = self.get_clock(session_id)
         new, log = advance_tick(clock, hours)
         self._update_session_field(session_id, "clock", new)
+        agendas: Dict[str, Dict[str, Any]] = {}
+        agenda_state = self.get_agenda_state(session_id)
+        for loc_chars in game_world.characters.values():
+            for name, char in loc_chars.items():
+                if name in agendas:
+                    continue  # First location wins, same as get_character.
+                raw = [s.dict() for s in (char.agenda or [])]
+                if raw:
+                    agendas[name] = {
+                        "agenda": raw,
+                        "progress": agenda_state.get(name),
+                    }
+        if agendas:
+            new_progress, agenda_log = advance_agendas(agendas, hours, new)
+            self._update_session_field(session_id, "agenda_state", new_progress)
+            if agenda_log:
+                data = self._get_session_data(session_id)
+                npc_states = data.get("npc_states", {}) if data else {}
+                facts = self.get_world_facts(session_id)
+                states_changed = False
+                facts_changed = False
+                for entry in agenda_log:
+                    effect = entry["effect"]
+                    if effect["kind"] == "move":
+                        state = npc_states.get(entry["npc"])
+                        if state is None:
+                            # An agenda NPC is a world character, so
+                            # create_session seeds it -- this is only
+                            # defensive. Seed from the world coords
+                            # so the entry is complete, not bare.
+                            char = game_world.get_character(entry["npc"])
+                            state = {
+                                "location": effect["location"],
+                                "x": char.x if char else 0,
+                                "y": char.y if char else 0,
+                            }
+                            npc_states[entry["npc"]] = state
+                        else:
+                            state["location"] = effect["location"]
+                        states_changed = True
+                    elif effect["kind"] == "fact":
+                        facts.append({
+                            "text": effect["text"],
+                            "topic": effect["topic"],
+                            "provenance": {
+                                "source": "agenda",
+                                "npc": entry["npc"],
+                                "step": entry["step"],
+                                "day": entry["day"],
+                                "hour": entry["hour"],
+                            },
+                        })
+                        facts_changed = True
+                if states_changed:
+                    self._update_session_field(session_id, "npc_states", npc_states)
+                if facts_changed:
+                    self._update_session_field(session_id, "world_facts", facts)
+                log = log + agenda_log
         return log
+
+    def get_npc_states(self, session_id: str) -> Dict[str, Dict[str, Any]]:
+        """The session's per-NPC state (location, x, y, ...) (§25,
+        slice 9). The bindings read an NPC's session home from here,
+        so an agenda move is visible in "Others here" -- the
+        location an NPC's session state holds, not the location
+        the world file lists them under."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return {}
+        states = data.get("npc_states")
+        return states if isinstance(states, dict) else {}
+
+    def get_agenda_state(self, session_id: str) -> Dict[str, Dict[str, Any]]:
+        """Per-NPC agenda progress for this session (§25, slice 9).
+        Sessions created before the column existed read as {}."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return {}
+        state = data.get("agenda_state")
+        return state if isinstance(state, dict) else {}
+
+    def get_world_facts(self, session_id: str) -> List[Dict[str, Any]]:
+        """Facts the tick engine has produced this session (§25,
+        slice 9): agenda completions, with provenance. Sessions
+        created before the column existed read as []."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return []
+        facts = data.get("world_facts")
+        return facts if isinstance(facts, list) else []
 
     def set_learned_knowledge(self, session_id: str,
                               ledger: List[Dict[str, Any]]):

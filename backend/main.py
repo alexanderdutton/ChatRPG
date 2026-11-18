@@ -196,6 +196,19 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
     clock = game_state_manager.get_clock(session_id)
     bindings_parts.append(
         f"It is {format_clock(clock)} ({time_of_day(clock['hour'])}).")
+    # World facts (§25, slice 9): what the tick engine has made
+    # happen -- agenda completions, so far. The model reports
+    # them; it never invents them. Only the last five, in the
+    # order they happened, so the prompt stays bounded.
+    facts = game_state_manager.get_world_facts(session_id)
+    if facts:
+        rendered = "; ".join(
+            f"{f.get('text', '')} "
+            f"(Day {f.get('provenance', {}).get('day', '?')}, "
+            f"{f.get('provenance', {}).get('hour', 0):02d}:00)"
+            for f in facts[-5:])
+        bindings_parts.append(
+            f"Things that have happened in the world: {rendered}.")
     bindings_parts.append(f"The player is in {current_location_name} with you.")
     if location_obj is not None:
         exits = [f"{d} to {dest}" for d, dest in location_obj.exits.items() if dest]
@@ -209,10 +222,18 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
         # whose schedule puts them here at the current hour. The
         # conversation partner is exempt -- they are present by
         # definition, because the player walked up to them.
+        # Home is the NPC's SESSION location (§25, slice 9): an
+        # agenda move relocates them, and the bindings must show
+        # that -- the world file's location is where they started,
+        # not where they are. An NPC missing from session state
+        # falls back to here, the old behavior.
+        npc_states = game_state_manager.get_npc_states(session_id)
         others = [c for c in location_obj.characters
                   if c.name != npc_info['name']
                   and is_present(c.dict(), current_location_name,
-                                 clock["hour"], current_location_name)]
+                                 clock["hour"],
+                                 npc_states.get(c.name, {}).get(
+                                     "location", current_location_name))]
         if others:
             bindings_parts.append(
                 "Others here: " + ", ".join(f"{c.name} ({c.x}, {c.y})" for c in others) + ".")
