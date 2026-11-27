@@ -99,6 +99,33 @@ class KnowledgeEntry(BaseModel):
             return max(-10, min(10, n))
         return n
 
+class ScheduleEntry(BaseModel):
+    # One row of an NPC's daily schedule (§25, slice 8): where the NPC
+    # is between start (inclusive) and end (exclusive), in hours 0-23.
+    # A range with start > end wraps midnight (22 -> 6). The engine
+    # reads this, never the model; a gap means home.
+    start: int
+    end: int
+    location: str
+
+
+class AgendaStep(BaseModel):
+    # One step of an NPC's agenda (§25, slice 9): a state-machine
+    # step in the world file. `duration_hours` counts ticks while
+    # the step is active; `after_step` / `after_time` gate when it
+    # becomes active; `effect` is exactly one of {"fact": {topic,
+    # text}} or {"move": {location}}. Structural validity is
+    # Pydantic, like ScheduleEntry; semantic validity is checked
+    # per tick in simulation.py, which skips malformed steps with a
+    # warning -- world files are author data, and a typo must not
+    # brick the world.
+    id: str
+    duration_hours: int
+    effect: Dict[str, Any]
+    after_step: Optional[str] = None
+    after_time: Optional[Dict[str, int]] = None
+
+
 class Character(BaseModel):
     # `id` and `provenance` are engine-set at commit time (slice 5,
     # write-back, §22). Shipped entities keep both as None and their
@@ -118,6 +145,15 @@ class Character(BaseModel):
     # Seeded in the world file for shipped NPCs; committed with the
     # character for generated ones.
     knowledge: List[KnowledgeEntry] = []
+    # Where this NPC is, by hour (§25, slice 8). Optional, default
+    # None -- not [] -- so save_world's exclude_none round-trip leaves
+    # the shipped file byte-stable for characters without one.
+    schedule: Optional[List[ScheduleEntry]] = None
+    # What this NPC is working toward, over days (§25, slice 9):
+    # steps with a precondition, an effect, and a duration in ticks.
+    # Same default-None rule as schedule -- the shipped file stays
+    # byte-stable for characters without one.
+    agenda: Optional[List[AgendaStep]] = None
 
 class Location(BaseModel):
     # See Character: `id` and `provenance` are engine-set at commit.
