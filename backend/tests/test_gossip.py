@@ -125,7 +125,11 @@ class TestRecordRumors(unittest.TestCase):
             "subject": "Corvin",
             "text": "Corvin camps in the Whispering Woods.",
             "said_by": "Joren", "turn": 3,
-            "verdict": "false", "status": "open"}])
+            "verdict": "false", "status": "open",
+            # Slice 10: the spread fields ride on every record.
+            # No recorded_at here -- no clock was passed.
+            "heard_by": [{"npc": "Joren", "hop": 0}],
+            "confidence": "medium"}])
 
     def test_true_rumor_recorded_from_grounded(self):
         records = record_rumors(_validation(

@@ -170,7 +170,12 @@ class TestGossipTurn(unittest.TestCase):
             "subject": "Corvin",
             "text": "Corvin camps in the Whispering Woods.",
             "said_by": "Joren", "turn": 2,
-            "verdict": "false", "status": "open"}])
+            "verdict": "false", "status": "open",
+            # Slice 10: the spread fields, stamped from the session
+            # clock -- still Day 1, 08:00, the greeting does not tick.
+            "heard_by": [{"npc": "Joren", "hop": 0}],
+            "confidence": "medium",
+            "recorded_at": {"day": 1, "hour": 8}}])
         claims = metadata["claims_validation"]["claims"]
         self.assertEqual(len(claims), 1)
         self.assertEqual(claims[0]["verdict"], "contradicts")
