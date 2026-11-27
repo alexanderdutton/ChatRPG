@@ -154,6 +154,14 @@ class Character(BaseModel):
     # Same default-None rule as schedule -- the shipped file stays
     # byte-stable for characters without one.
     agenda: Optional[List[AgendaStep]] = None
+    # Who this NPC talks to regularly (§25, slice 10): the rumor
+    # graph. Names of NPCs; the graph is undirected -- A-B are
+    # connected when either one lists the other -- so an author
+    # only needs to write each link once. Same default-None rule
+    # as schedule/agenda: the shipped file stays byte-stable for
+    # characters without one. A name the world does not know is
+    # ignored by the spread, never fatal.
+    connections: Optional[List[str]] = None
 
 class Location(BaseModel):
     # See Character: `id` and `provenance` are engine-set at commit.

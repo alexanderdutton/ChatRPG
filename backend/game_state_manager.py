@@ -4,7 +4,9 @@ import os
 from typing import Dict, List, Any, Optional, Tuple
 from .game_world import game_world
 from .gemini_service import generate_item_details, generate_quest, DIFFICULTY_TABLE
-from .simulation import advance_agendas, advance_tick, is_present, new_clock
+from .simulation import (advance_agendas, advance_rumors,
+                         advance_tick, build_rumor_graph, is_present,
+                         new_clock)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -241,6 +243,16 @@ class GameStateManager:
         try:
             cursor.execute(
                 "ALTER TABLE sessions ADD COLUMN world_facts TEXT DEFAULT '[]'")
+        except sqlite3.OperationalError:
+            pass # Column likely already exists
+
+        # Rumor knowledge per NPC (slice 10, §25): {npc: [entries]}
+        # -- what each NPC has heard through the rumor graph, with
+        # provenance. Sessions created before this column existed
+        # read as {}.
+        try:
+            cursor.execute(
+                "ALTER TABLE sessions ADD COLUMN npc_rumor_knowledge TEXT DEFAULT '{}'")
         except sqlite3.OperationalError:
             pass # Column likely already exists
 
@@ -514,7 +526,8 @@ class GameStateManager:
             # Deserialize JSON fields
             for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
                           'learned_knowledge', 'pending_referrals', 'clock',
-                          'agenda_state', 'world_facts', 'rumor_records']:
+                          'agenda_state', 'world_facts', 'rumor_records',
+                          'npc_rumor_knowledge']:
                 if data.get(field):
                     try:
                         data[field] = json.loads(data[field])
@@ -523,7 +536,7 @@ class GameStateManager:
                 elif field in ('learned_knowledge', 'pending_referrals',
                                'world_facts', 'rumor_records'):
                     data[field] = []
-                elif field == 'agenda_state':
+                elif field in ('agenda_state', 'npc_rumor_knowledge'):
                     data[field] = {}
             return data
         return None
@@ -535,7 +548,8 @@ class GameStateManager:
         
         if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
                      'learned_knowledge', 'pending_referrals', 'clock',
-                     'agenda_state', 'world_facts', 'rumor_records']:
+                     'agenda_state', 'world_facts', 'rumor_records',
+                     'npc_rumor_knowledge']:
             value = json.dumps(value)
             
         cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
@@ -654,10 +668,12 @@ class GameStateManager:
     def advance_clock(self, session_id: str, hours: int = 1) -> List[Dict[str, Any]]:
         """One tick for this session: advance the clock, persist it,
         return the tick log. Slice 8 logs only the clock; slice 9
-        appends agenda effects to the same log. The simulation only
-        describes effects -- this method applies them: a move
-        relocates the NPC in npc_states, a fact is recorded in
-        world_facts with its provenance."""
+        appends agenda effects and slice 10 rumor hops to the same
+        log. The simulation only describes effects -- this method
+        applies them: a move relocates the NPC in npc_states, a
+        fact is recorded in world_facts with its provenance, a
+        rumor hop is recorded in the rumor records and the
+        listener's rumor knowledge."""
         clock = self.get_clock(session_id)
         new, log = advance_tick(clock, hours)
         self._update_session_field(session_id, "clock", new)
@@ -719,6 +735,30 @@ class GameStateManager:
                 if facts_changed:
                     self._update_session_field(session_id, "world_facts", facts)
                 log = log + agenda_log
+        # Rumor spread (slice 10, §25): after agendas, the tick
+        # moves open, fresh rumors one hop along the relationship
+        # graph. The simulation describes the hops; this method
+        # applies them -- the records gain their new listeners,
+        # and each listener gains a knowledge entry flagged rumor
+        # with provenance. Runs on every tick, including moves:
+        # the world talks while the player walks.
+        connections: Dict[str, List[str]] = {}
+        for loc_chars in game_world.characters.values():
+            for name, char in loc_chars.items():
+                if name in connections:
+                    continue  # First location wins, same as get_character.
+                connections[name] = list(char.connections or [])
+        records = self.get_rumor_records(session_id)
+        new_records, new_entries, rumor_log = advance_rumors(
+            records, build_rumor_graph(connections), new)
+        if new_records != records:
+            self.set_rumor_records(session_id, new_records)
+        if new_entries:
+            stored = self.get_npc_rumor_knowledge(session_id)
+            for listener, entries in new_entries.items():
+                stored.setdefault(listener, []).extend(entries)
+            self.set_npc_rumor_knowledge(session_id, stored)
+        log = log + rumor_log
         return log
 
     def get_npc_states(self, session_id: str) -> Dict[str, Dict[str, Any]]:
@@ -775,6 +815,24 @@ class GameStateManager:
     def set_rumor_records(self, session_id: str,
                           records: List[Dict[str, Any]]):
         self._update_session_field(session_id, "rumor_records", records)
+
+    def get_npc_rumor_knowledge(
+            self, session_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        """What each NPC has heard through the rumor graph this
+        session (§25, slice 10): {npc: [knowledge entries]}, each
+        flagged rumor with provenance (from_npc, hop). Sessions
+        created before the column existed read as {}."""
+        data = self._get_session_data(session_id)
+        if not data:
+            return {}
+        stored = data.get("npc_rumor_knowledge")
+        return stored if isinstance(stored, dict) else {}
+
+    def set_npc_rumor_knowledge(
+            self, session_id: str,
+            knowledge: Dict[str, List[Dict[str, Any]]]):
+        self._update_session_field(session_id, "npc_rumor_knowledge",
+                                   knowledge)
 
     def resolve_npc_id(self, identifier: str) -> str:
         """Resolve a name-or-id to the character's id, when the world
