@@ -208,9 +208,12 @@ class GameStateManager:
         except sqlite3.OperationalError:
             pass # Column likely already exists
 
-        # Knowledge ledger + pending referrals (slice 6, §23): what the
-        # player has learned this session, and who they were sent to.
-        for column in ("learned_knowledge", "pending_referrals"):
+        # Knowledge ledger + pending referrals + rumor records
+        # (slices 6–7, §23–§24): what the player has learned this
+        # session, who they were sent to, and what rumors were told
+        # that may be wrong.
+        for column in ("learned_knowledge", "pending_referrals",
+                       "rumor_records"):
             try:
                 cursor.execute(
                     f"ALTER TABLE sessions ADD COLUMN {column} TEXT DEFAULT '[]'")
@@ -511,13 +514,14 @@ class GameStateManager:
             # Deserialize JSON fields
             for field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
                           'learned_knowledge', 'pending_referrals', 'clock',
-                          'agenda_state', 'world_facts']:
+                          'agenda_state', 'world_facts', 'rumor_records']:
                 if data.get(field):
                     try:
                         data[field] = json.loads(data[field])
                     except json.JSONDecodeError:
                         data[field] = [] if field != 'npc_states' else {}
-                elif field in ('learned_knowledge', 'pending_referrals', 'world_facts'):
+                elif field in ('learned_knowledge', 'pending_referrals',
+                               'world_facts', 'rumor_records'):
                     data[field] = []
                 elif field == 'agenda_state':
                     data[field] = {}
@@ -531,7 +535,7 @@ class GameStateManager:
         
         if field in ['inventory', 'quest_log', 'npc_states', 'conversation_history',
                      'learned_knowledge', 'pending_referrals', 'clock',
-                     'agenda_state', 'world_facts']:
+                     'agenda_state', 'world_facts', 'rumor_records']:
             value = json.dumps(value)
             
         cursor.execute(f"UPDATE sessions SET {field} = ? WHERE session_id = ?", (value, session_id))
@@ -759,6 +763,18 @@ class GameStateManager:
     def set_pending_referrals(self, session_id: str,
                               referrals: List[Dict[str, Any]]):
         self._update_session_field(session_id, "pending_referrals", referrals)
+
+    def get_rumor_records(self, session_id: str) -> List[Dict[str, Any]]:
+        """Rumor records this session (§24): what NPCs said that may
+        be wrong, with the engine's verdict and status. Session-scoped
+        like the ledger — what the player heard does not persist
+        across playthroughs."""
+        data = self._get_session_data(session_id)
+        return data.get("rumor_records") or [] if data else []
+
+    def set_rumor_records(self, session_id: str,
+                          records: List[Dict[str, Any]]):
+        self._update_session_field(session_id, "rumor_records", records)
 
     def resolve_npc_id(self, identifier: str) -> str:
         """Resolve a name-or-id to the character's id, when the world
