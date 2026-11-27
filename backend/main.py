@@ -137,6 +137,17 @@ class NPCResponse(BaseModel):
 
 # --- API Endpoints ---
 
+def _npc_knowledge_with_rumors(session_id: str,
+                               npc_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """World-file knowledge plus what this NPC heard through the
+    rumor graph (slice 10, §25). get_npc_info returns a fresh dict,
+    so callers assign the result back into npc_info["knowledge"]
+    and the world file is never touched."""
+    heard = game_state_manager.get_npc_rumor_knowledge(session_id)
+    entries = heard.get(npc_info["name"]) or []
+    return (npc_info.get("knowledge") or []) + entries
+
+
 def build_system_instruction(session_id: str, npc_id: str) -> str:
     """Assemble the system instruction for a conversation turn (slice 1).
 
@@ -145,6 +156,7 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
     reconstructing it by hand.
     """
     npc_info = game_state_manager.get_npc_info(npc_id)
+    npc_info["knowledge"] = _npc_knowledge_with_rumors(session_id, npc_info)
     npc_state = game_state_manager.get_npc_state(session_id, npc_id)
     npc_memory = npc_state.get("memory", [])
     conversation_history = game_state_manager.get_conversation_history(session_id)
@@ -278,10 +290,16 @@ def build_system_instruction(session_id: str, npc_id: str) -> str:
     if npc_knowledge:
         lines = []
         for entry in npc_knowledge:
+            source = entry.get('source')
+            teller = (entry.get('provenance') or {}).get('from_npc')
+            if teller:
+                # A spread rumor names who it came from, so the NPC
+                # can say so in character (slice 10).
+                source = f"heard from {teller}"
             lines.append(
                 f"- [{entry.get('id')}] ({entry.get('topic')}) "
                 f"{entry.get('fact')} "
-                f"(learned: {entry.get('source')}, "
+                f"(learned: {source}, "
                 f"confidence: {entry.get('confidence')})")
         knowledge_context = (
             "What you know — assert only these facts, in your own "
@@ -639,7 +657,9 @@ async def interact_with_npc(user_input: UserInput):
     # Knowledge shared this turn (slice 6, §23): the engine checks the
     # ids against what the NPC actually knows, and the validated ones
     # join the player's ledger — a claim the engine can check, unlike
-    # free text.
+    # free text. The checked list includes what the NPC heard through
+    # the rumor graph (slice 10), same merge as the prompt context.
+    npc_info["knowledge"] = _npc_knowledge_with_rumors(session_id, npc_info)
     shared_valid, shared_unknown = validate_shared(
         turn.knowledge_shared, npc_info.get("knowledge") or [])
     if shared_unknown:
@@ -665,7 +685,8 @@ async def interact_with_npc(user_input: UserInput):
     # truth-grade fact learned this turn can correct or confirm an
     # open record. Recorded whether or not anything was learned:
     # gossip is its own channel, not a side effect of learning.
-    new_rumors = record_rumors(validation, npc_info["name"], turn_number)
+    new_rumors = record_rumors(validation, npc_info["name"], turn_number,
+                               clock=game_state_manager.get_clock(session_id))
     rumor_records = game_state_manager.get_rumor_records(session_id)
     rumor_records, added_rumors = add_rumor_records(
         rumor_records, new_rumors)

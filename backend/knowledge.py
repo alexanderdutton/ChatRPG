@@ -227,7 +227,8 @@ def learn_knowledge(
 
 
 def record_rumors(validation: Any, npc_name: str,
-                  turn_number: int) -> List[Dict[str, Any]]:
+                  turn_number: int,
+                  clock: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
     """Rumor records for one validated turn (§24): every claim the
     model hedged as a rumor, with the engine's verdict on it.
 
@@ -240,8 +241,14 @@ def record_rumors(validation: Any, npc_name: str,
     - anything else (new_proposed / ungrounded / unverifiable) ->
       unknown: the engine cannot grade this one, and says so.
 
-    `validation` is a TurnValidation; the function reads only its
-    claims, so it stays a pure function of the checked turn."""
+    Each record also carries the slice-10 spread fields: `heard_by`
+    starts as the teller at hop 0, `confidence` is "medium" (a
+    rumor is secondhand by definition; claims carry no confidence,
+    and §24 treats unknown as medium for scaling), and
+    `recorded_at` is the session clock when given, so the tick
+    can judge freshness in world time. `validation` is a
+    TurnValidation; the function reads only its claims, so it
+    stays a pure function of the checked turn."""
     records: List[Dict[str, Any]] = []
     for claim in validation.claims:
         if claim.kind != "rumor" or not claim.subject:
@@ -254,14 +261,28 @@ def record_rumors(validation: Any, npc_name: str,
             verdict = "true"
         else:
             verdict = "unknown"
-        records.append({
+        record: Dict[str, Any] = {
             "subject": claim.subject,
             "text": claim.text,
             "said_by": npc_name,
             "turn": turn_number,
             "verdict": verdict,
             "status": "open",
-        })
+            "heard_by": [{"npc": npc_name, "hop": 0}],
+            "confidence": "medium",
+        }
+        if isinstance(clock, dict):
+            try:
+                day = int(clock["day"])
+                hour = int(clock["hour"])
+            except (KeyError, TypeError, ValueError):
+                day = hour = None
+            if (day is not None and hour is not None
+                    and not isinstance(clock.get("day"), bool)
+                    and not isinstance(clock.get("hour"), bool)
+                    and day >= 1 and 0 <= hour < 24):
+                record["recorded_at"] = {"day": day, "hour": hour}
+        records.append(record)
     return records
 
 
@@ -271,11 +292,14 @@ def add_rumor_records(
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Add `new_records` to the session's rumor records, deduped by
     (said_by, subject, text) — the same NPC repeating the same rumor
-    does not stack records. Returns the updated list and the newly
-    added records."""
+    does not stack records. New records that lack the slice-10
+    spread fields are backfilled here (`heard_by` from `said_by`,
+    `confidence` medium, no stamp); records already stored pass
+    through untouched — the tick backfills those when it spreads
+    them. Returns the updated list and the newly added records."""
     known = {(r.get("said_by"), _normalize(r.get("subject") or ""),
               _normalize(r.get("text") or "")) for r in records or []}
-    updated = list(records or [])
+    updated = [dict(r) for r in records or []]
     newly: List[Dict[str, Any]] = []
     for record in new_records or []:
         key = (record.get("said_by"),
@@ -283,10 +307,28 @@ def add_rumor_records(
                _normalize(record.get("text") or ""))
         if key in known:
             continue
-        updated.append(dict(record))
-        newly.append(dict(record))
+        filled = dict(record)
+        _backfill_rumor_record(filled)
+        updated.append(filled)
+        newly.append(dict(filled))
         known.add(key)
     return updated, newly
+
+
+def _backfill_rumor_record(record: Dict[str, Any]) -> None:
+    """Fill the slice-10 spread fields on one record, in place.
+    A record without a teller gets an empty heard_by (nobody to
+    spread from); a record without a stamp stays unstamped and
+    therefore fresh. Never overwrites fields that are already
+    present and well-formed."""
+    heard_by = record.get("heard_by")
+    if not isinstance(heard_by, list) or not heard_by:
+        said_by = record.get("said_by")
+        record["heard_by"] = (
+            [{"npc": said_by, "hop": 0}]
+            if isinstance(said_by, str) and said_by else [])
+    if record.get("confidence") not in ("high", "medium", "low"):
+        record["confidence"] = "medium"
 
 
 def reconcile_rumors(

@@ -370,3 +370,246 @@ def advance_agendas(
         else:
             progress["current"] = first["id"]
     return new_progress, log
+
+# ---- Rumor spread (§25, slice 10) -----------------------------------------
+# Slice 7 records rumors with verdicts; the tick moves them along
+# the relationship graph. A tells B if they are connected and the
+# rumor is fresh; confidence decays per hop. The engine knows
+# exactly who heard what -- the part the model could never be
+# trusted to track.
+#
+# The record is the ledger: each record carries `heard_by`
+# ([{npc, hop}], starting as [{said_by, 0}]), a `confidence`
+# ("medium" at recording -- a rumor is secondhand by definition),
+# and a `recorded_at` clock stamp for freshness. The spread writes
+# one knowledge entry per listener into the session (not the world
+# file), flagged rumor with provenance, so the listener can share
+# it with the player through the existing knowledge_shared path.
+#
+# One hop per knower per tick call: a listener added this tick
+# does not spread further until the next tick, so the rumor walks
+# the graph over days instead of cascading in one call -- the same
+# discipline as agendas. Freshness bounds the spread (24 hours);
+# confidence bounds the effect (low applies nothing, §24), not
+# the travel: a low-confidence rumor still moves, it just moves
+# no dice. Only open records spread -- a corrected or confirmed
+# record is settled, and the rumor as a rumor is dead.
+#
+# This module only DESCRIBES effects: advance_rumors returns the
+# updated records, the new entries by listener, and the log, and
+# the manager applies them. The simulation stays pure.
+
+import hashlib as _hashlib
+import re as _re
+
+RUMOR_FRESH_HOURS = 24
+_CONFIDENCE_STEPS = ("high", "medium", "low")
+
+
+def _decay_confidence(confidence: Any, hops: int) -> str:
+    """One step down per hop, flooring at low. An unknown
+    confidence starts at medium -- secondhand, like every rumor
+    (§24 treats unknown as medium for scaling)."""
+    if confidence not in _CONFIDENCE_STEPS:
+        confidence = "medium"
+    idx = _CONFIDENCE_STEPS.index(confidence) + max(0, int(hops))
+    return _CONFIDENCE_STEPS[min(idx, len(_CONFIDENCE_STEPS) - 1)]
+
+
+def _slug(text: Any) -> str:
+    """A short deterministic slug for entry ids: lowercase, runs
+    of non-alphanumerics become one dash, capped at 40 chars."""
+    slug = _re.sub(r"[^a-z0-9]+", "-", str(text or "").strip().lower())
+    return slug.strip("-")[:40] or "rumor"
+
+
+def _total_hours(clock: Dict[str, int]) -> int:
+    return (int(clock["day"]) - 1) * HOURS_PER_DAY + int(clock["hour"])
+
+
+def _recorded_total(record: Dict[str, Any]) -> Optional[int]:
+    """Total hours the record was stamped at, or None when the
+    record carries no usable stamp -- records written before
+    this slice have none, and a malformed stamp is treated the
+    same: the engine cannot prove them stale, so they are fresh."""
+    stamped = record.get("recorded_at")
+    if not isinstance(stamped, dict):
+        return None
+    try:
+        day = int(stamped["day"])
+        hour = int(stamped["hour"])
+    except (KeyError, TypeError, ValueError):
+        logger.warning("Rumor record %r has a bad recorded_at %r; "
+                       "treating it as fresh", record.get("subject"), stamped)
+        return None
+    if isinstance(stamped.get("day"), bool) or isinstance(stamped.get("hour"), bool):
+        logger.warning("Rumor record %r has a bad recorded_at %r; "
+                       "treating it as fresh", record.get("subject"), stamped)
+        return None
+    if day < 1 or not 0 <= hour < HOURS_PER_DAY:
+        logger.warning("Rumor record %r has a bad recorded_at %r; "
+                       "treating it as fresh", record.get("subject"), stamped)
+        return None
+    return (day - 1) * HOURS_PER_DAY + hour
+
+
+def build_rumor_graph(
+    connections: Optional[Dict[str, Any]],
+) -> Dict[str, List[str]]:
+    """The undirected relationship graph from world-file data:
+    {npc: [names it lists in `connections`]}. A-B are connected
+    when either one lists the other, so an author writes each
+    link once. A name the world does not know (no entry of its
+    own) is dropped with a warning; self-links are dropped.
+    Returns {npc: sorted [connected names]}; NPCs with no links
+    get no entry. Inputs are never mutated."""
+    known = {n for n in (connections or {}) if isinstance(n, str) and n}
+    graph: Dict[str, set] = {}
+    for npc, links in (connections or {}).items():
+        if not isinstance(npc, str) or not npc:
+            continue
+        if not isinstance(links, list):
+            logger.warning("Connections for %r are not a list, skipping", npc)
+            continue
+        for other in links:
+            if not isinstance(other, str) or not other:
+                continue
+            if other == npc:
+                continue
+            if other not in known:
+                logger.warning(
+                    "Connections for %r name unknown NPC %r, skipping",
+                    npc, other)
+                continue
+            graph.setdefault(npc, set()).add(other)
+            graph.setdefault(other, set()).add(npc)
+    return {npc: sorted(peers) for npc, peers in sorted(graph.items())}
+
+
+def advance_rumors(
+    records: Optional[List[Dict[str, Any]]],
+    graph: Optional[Dict[str, List[str]]],
+    clock: Dict[str, int],
+) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]],
+           List[Dict[str, Any]]]:
+    """Spread every open, fresh rumor one hop along the graph.
+
+    records is the session's rumor records (slice 7, plus the
+    slice-10 fields -- missing ones are backfilled here, so
+    records written before this slice spread rather than
+    breaking). graph is build_rumor_graph's output. clock is
+    the NEW clock -- freshness is measured against it.
+
+    Returns (new_records, new_entries, log). new_records is the
+    full list with heard_by/confidence/recorded_at backfilled
+    and this tick's listeners appended; new_entries maps each
+    listener to the knowledge entries it gained this tick; log
+    holds one entry per hop, in record order and, within a
+    record, knower then listener name order, so the log is
+    deterministic. Inputs are never mutated.
+    """
+    try:
+        day = int(clock["day"])
+        hour = int(clock["hour"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError(f"clock must carry int day/hour, got {clock!r}")
+    if isinstance(clock.get("day"), bool) or isinstance(clock.get("hour"), bool):
+        raise ValueError(f"clock must carry int day/hour, got {clock!r}")
+    if not 0 <= hour < HOURS_PER_DAY:
+        raise ValueError(f"clock hour out of range: {hour}")
+    clock = {"day": day, "hour": hour}
+    now_total = _total_hours(clock)
+
+    graph = graph or {}
+    new_records: List[Dict[str, Any]] = []
+    new_entries: Dict[str, List[Dict[str, Any]]] = {}
+    log: List[Dict[str, Any]] = []
+
+    for record in records or []:
+        if not isinstance(record, dict):
+            logger.warning("Rumor record is not an object, skipping: %r", record)
+            continue
+        updated = dict(record)
+        subject = updated.get("subject")
+        text = updated.get("text")
+        said_by = updated.get("said_by")
+        # Backfill the slice-10 fields on records that lack them.
+        heard_by = updated.get("heard_by")
+        if not isinstance(heard_by, list):
+            heard_by = []
+        clean_heard = []
+        for entry in heard_by:
+            if (isinstance(entry, dict) and isinstance(entry.get("npc"), str)
+                    and entry.get("npc")
+                    and isinstance(entry.get("hop"), int)
+                    and not isinstance(entry.get("hop"), bool)
+                    and entry["hop"] >= 0):
+                clean_heard.append({"npc": entry["npc"], "hop": entry["hop"]})
+        if not clean_heard and isinstance(said_by, str) and said_by:
+            clean_heard = [{"npc": said_by, "hop": 0}]
+        updated["heard_by"] = clean_heard
+        if updated.get("confidence") not in _CONFIDENCE_STEPS:
+            updated["confidence"] = "medium"
+        new_records.append(updated)
+
+        if updated.get("status") != "open":
+            # Settled records do not spread: the truth is out and
+            # the rumor as a rumor is dead.
+            continue
+        if not isinstance(subject, str) or not subject:
+            logger.warning("Rumor record without a subject cannot spread: %r", record)
+            continue
+        if not isinstance(text, str) or not text:
+            logger.warning("Rumor record without text cannot spread: %r", record)
+            continue
+        stamped_total = _recorded_total(updated)
+        if stamped_total is not None and now_total - stamped_total > RUMOR_FRESH_HOURS:
+            # Stale: the rumor has had its day. No warning -- going
+            # stale is the normal end of a rumor, not bad data.
+            continue
+        heard_names = {h["npc"] for h in clean_heard}
+        # Snapshot the knowers: a listener added this tick does not
+        # spread further until the next tick.
+        knowers = sorted(clean_heard, key=lambda h: h["npc"])
+        for knower in knowers:
+            for listener in graph.get(knower["npc"], []):
+                if listener in heard_names:
+                    continue
+                hop = knower["hop"] + 1
+                confidence = _decay_confidence(updated["confidence"], hop)
+                entry_id = (
+                    f"rumor-{_slug(subject)}-"
+                    f"{_hashlib.sha1(text.encode('utf-8')).hexdigest()[:8]}"
+                )
+                entry = {
+                    "id": entry_id,
+                    "topic": subject,
+                    "fact": text,
+                    "source": "heard_from",
+                    "confidence": confidence,
+                    "dc_modifier": 0,
+                    "provenance": {
+                        "source": "rumor-spread",
+                        "from_npc": knower["npc"],
+                        "hop": hop,
+                        "subject": subject,
+                        "day": clock["day"],
+                        "hour": clock["hour"],
+                    },
+                }
+                new_entries.setdefault(listener, []).append(entry)
+                updated["heard_by"] = updated["heard_by"] + [
+                    {"npc": listener, "hop": hop}]
+                heard_names.add(listener)
+                log.append({
+                    "kind": "rumor",
+                    "subject": subject,
+                    "text": text,
+                    "from": knower["npc"],
+                    "to": listener,
+                    "hop": hop,
+                    "confidence": confidence,
+                    "day": clock["day"],
+                    "hour": clock["hour"],
+                })
+    return new_records, new_entries, log
